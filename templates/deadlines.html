@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Deadlines</title>
+    <style>body{font-family:Segoe UI, Arial; margin:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px}th{background:#f4f4f4}</style>
+  </head>
+  <body>
+    <h1>Deadlines</h1>
+    <p><a href="/dashboard">Back to Dashboard</a></p>
+    <table>
+      <thead><tr><th>File</th><th>Deadlines</th><th>Path</th></tr></thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td>{{ it.filename }}</td>
+          <td>
+            <ul>
+            {% for d in it.deadlines %}
+              <li>{{ d }}</li>
+            {% endfor %}
+            </ul>
+          </td>
+          <td><code>{{ it.filepath }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </body>
+</html>

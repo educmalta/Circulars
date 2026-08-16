@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Circulars Dashboard</title>
+    <style>
+      body{font-family:Segoe UI, Arial; margin:20px}
+      table{border-collapse:collapse;width:100%}
+      th,td{border:1px solid #ddd;padding:8px}
+      th{background:#f4f4f4}
+      .group{margin-bottom:20px}
+    </style>
+  </head>
+  <body>
+    <h1>Circulars Dashboard</h1>
+    <p><a href="/deadlines">View Deadlines</a> | <a href="/rescan">Rescan Now</a></p>
+
+    <h2>By Year and Sender</h2>
+    <table>
+      <thead><tr><th>Year</th><th>Sender</th><th>Count</th></tr></thead>
+      <tbody>
+        {% for g in groups %}
+        <tr><td>{{ g.year or 'Unknown' }}</td><td>{{ g.sender }}</td><td>{{ g.count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>All Items</h2>
+    <table>
+      <thead><tr><th>File</th><th>Year</th><th>Sender</th><th>Path</th></tr></thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td>{{ it.filename }}</td>
+          <td>{{ it.year or 'Unknown' }}</td>
+          <td>{{ it.sender }}</td>
+          <td><code>{{ it.filepath }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </body>
+</html>
