@@ -32,9 +32,24 @@ def init_db(db_path=DB_PATH):
             sender TEXT,
             deadlines TEXT,
             snippet TEXT,
-            last_modified REAL
+            last_modified REAL,
+            department TEXT,
+            circular_number INTEGER
         )
     ''')
+    # ensure columns exist for older DBs
+    cur.execute("PRAGMA table_info(circulars)")
+    cols = [r[1] for r in cur.fetchall()]
+    if 'department' not in cols:
+        try:
+            cur.execute("ALTER TABLE circulars ADD COLUMN department TEXT")
+        except Exception:
+            pass
+    if 'circular_number' not in cols:
+        try:
+            cur.execute("ALTER TABLE circulars ADD COLUMN circular_number INTEGER")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -110,33 +125,69 @@ def scan_folder(folder=RAW_FOLDER, db_path=DB_PATH):
                 text = text_from_pdf(path)
             snippet = (text[:800] + '...') if len(text) > 800 else text
             dates = find_dates(text)
-            sender = guess_sender(text)
-            year = None
-            # derive year from filename or dates or mtime
-            year_match = re.search(r"(19|20)\d{2}", fn)
-            if year_match:
-                year = int(year_match.group(0))
-            elif dates:
+
+            # Try to parse filename patterns like 'DGPM 14/2026' or 'DGPM_14-2026'
+            department = None
+            circular_num = None
+            # common patterns: ABC 14/2026, ABC_14-2026, ABC-14_2026
+            file_match = re.search(r"([A-Za-z]{2,10})[\._\-\s]*?(\d{1,4})[\/_\-]?(\d{4})", fn)
+            if file_match:
+                department = file_match.group(1).upper()
                 try:
-                    year = int(dates[0][:4])
+                    circular_num = int(file_match.group(2))
                 except Exception:
-                    pass
-            else:
+                    circular_num = None
                 try:
-                    year = datetime.fromtimestamp(mtime).year
+                    year = int(file_match.group(3))
                 except Exception:
                     year = None
+            else:
+                # fallback: look inside text for patterns like DGPM 14/2026
+                m2 = re.search(r"([A-Za-z]{2,10})\s+(\d{1,4})/(\d{4})", text)
+                if m2:
+                    department = m2.group(1).upper()
+                    try:
+                        circular_num = int(m2.group(2))
+                    except Exception:
+                        circular_num = None
+                    try:
+                        year = int(m2.group(3))
+                    except Exception:
+                        year = None
+
+            # sender fallback
+            sender = department if department else guess_sender(text)
+
+            # derive year if still missing
+            if 'year' not in locals() or year is None:
+                year = None
+                year_match = re.search(r"(19|20)\d{2}", fn)
+                if year_match:
+                    year = int(year_match.group(0))
+                elif dates:
+                    try:
+                        year = int(dates[0][:4])
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        year = datetime.fromtimestamp(mtime).year
+                    except Exception:
+                        year = None
+
             cur.execute('''
-                INSERT INTO circulars (filepath, filename, year, sender, deadlines, snippet, last_modified)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO circulars (filepath, filename, year, sender, deadlines, snippet, last_modified, department, circular_number)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(filepath) DO UPDATE SET
                   filename=excluded.filename,
                   year=excluded.year,
                   sender=excluded.sender,
                   deadlines=excluded.deadlines,
                   snippet=excluded.snippet,
-                  last_modified=excluded.last_modified
-            ''', (path, fn, year, sender, json.dumps(dates), snippet, mtime))
+                  last_modified=excluded.last_modified,
+                  department=excluded.department,
+                  circular_number=excluded.circular_number
+            ''', (path, fn, year, sender, json.dumps(dates), snippet, mtime, department, circular_num))
     conn.commit()
     conn.close()
 

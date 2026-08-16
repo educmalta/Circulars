@@ -1,5 +1,0 @@
-﻿Add Circulars Flask dashboard and processor
-
-Implements folder scanning, DOCX/PDF parsing, DB storage, templates, and README.
-
-Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>

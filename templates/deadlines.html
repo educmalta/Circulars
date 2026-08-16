@@ -6,25 +6,45 @@
     <style>body{font-family:Segoe UI, Arial; margin:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px}th{background:#f4f4f4}</style>
   </head>
   <body>
-    <h1>Deadlines</h1>
+    <h1 style="color:#c62828;">Deadlines</h1>
     <p><a href="/dashboard">Back to Dashboard</a></p>
+
+    <form method="get" action="/deadlines" style="margin:12px 0;display:flex;gap:12px;align-items:center">
+      <label for="year">Year:</label>
+      <select name="year" id="year" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for y in years %}
+          <option value="{{ y }}" {% if request.args.get('year') and request.args.get('year')|int==y %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="department">Department:</label>
+      <select name="department" id="department" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for d in departments %}
+          <option value="{{ d }}" {% if request.args.get('department')==d %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+      </select>
+
+      <a href="/deadlines" style="margin-left:8px">Clear</a>
+    </form>
+
+    {% if items|length==0 %}
+      <p style="color:#555">No deadlines found for the selected filters.</p>
+    {% else %}
     <table>
-      <thead><tr><th>File</th><th>Deadlines</th><th>Path</th></tr></thead>
+      <thead><tr><th>File</th><th>Deadline</th><th>Days</th><th>Path</th></tr></thead>
       <tbody>
         {% for it in items %}
         <tr>
-          <td>{{ it.filename }}</td>
-          <td>
-            <ul>
-            {% for d in it.deadlines %}
-              <li>{{ d }}</li>
-            {% endfor %}
-            </ul>
-          </td>
+          <td style="font-weight:600">{{ it.filename }}</td>
+          <td style="color:#b71c1c;font-weight:700">{{ it.best_deadline_display }}</td>
+          <td>{{ it.days_distance }}</td>
           <td><code>{{ it.filepath }}</code></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
+    {% endif %}
   </body>
 </html>
