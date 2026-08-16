@@ -134,7 +134,16 @@ def deadlines():
 def rescan():
     try:
         scan_folder(RAW_FOLDER, DB_PATH)
-        return jsonify({'status': 'ok'})
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute('SELECT COUNT(*) FROM circulars')
+        total = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM circulars WHERE deadlines IS NOT NULL AND length(deadlines) > 2")
+        with_deadlines = cur.fetchone()[0]
+        cur.execute("SELECT department, COUNT(*) FROM circulars GROUP BY department")
+        depts = { (r[0] if r[0] else 'Unknown'): r[1] for r in cur.fetchall() }
+        conn.close()
+        return jsonify({'status': 'ok', 'total': total, 'with_deadlines': with_deadlines, 'departments': depts})
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 

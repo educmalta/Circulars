@@ -13,9 +13,15 @@ RAW_FOLDER = r"C:\Users\JeffreyZammit\Desktop\AI Projects\Circulars\raw circular
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "circulars.db")
 
 DATE_REGEXES = [
+    # numeric dates like 25/09/2026 or 2026-09-25
     r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
     r"\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b",
+    # month-name formats: 'September 25, 2026' or 'Sep 25 2026'
     r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b",
+    # day-month-year with month name and optional ordinal: '25 September 2026', '25th September 2026'
+    r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{4}\b",
+    # catch written forms like '25th Sep 2026'
+    r"\b\d{1,2}(?:st|nd|rd|th)?[\s\-](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[\s\-]\d{4}\b",
 ]
 SENDER_KEYWORDS = ["DGPM", "Directorate", "DG", "Ministry", "Director" ]
 
@@ -157,6 +163,22 @@ def scan_folder(folder=RAW_FOLDER, db_path=DB_PATH):
 
             # sender fallback
             sender = department if department else guess_sender(text)
+
+            # if department still missing, try to infer from sender or text (look for uppercase acronyms like DGPM, DDLTS)
+            if not department:
+                # check sender for an uppercase token
+                dept_match = re.search(r"\b([A-Z]{2,6})\b", sender or "")
+                if not dept_match:
+                    # check filename
+                    dept_match = re.search(r"\b([A-Z]{2,6})\b", fn)
+                if not dept_match:
+                    # check text for common 'Ref', 'Referenza' patterns
+                    dept_match = re.search(r"\bRefer(?:en[cz]a|ence)[:\s]*([A-Z]{2,6})\b", text, flags=re.IGNORECASE)
+                if dept_match:
+                    candidate = dept_match.group(1).upper()
+                    # filter out short common words
+                    if len(candidate) >= 2 and candidate.isalpha():
+                        department = candidate
 
             # derive year if still missing
             if 'year' not in locals() or year is None:
