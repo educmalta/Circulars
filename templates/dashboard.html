@@ -51,20 +51,17 @@
     </div>
 
     <h2 style="margin-top:18px;color:#0b5cff;">All Items</h2>
-    <table>
-      <thead><tr><th style="width:35%">File</th><th>Year</th><th>Sender</th><th>Department</th><th>Number</th><th>Path</th></tr></thead>
-      <tbody>
-        {% for it in items %}
-        <tr>
-          <td style="font-weight:600">{{ it.filename }}</td>
-          <td>{{ it.year or 'Unknown' }}</td>
-          <td>{{ it.sender }}</td>
-          <td>{{ it.department or '-' }}</td>
-          <td>{% if it.circular_number %}{{ '%02d'|format(it.circular_number) }}{% else %}-{% endif %}</td>
-          <td><code>{{ it.filepath }}</code></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      {% for it in items %}
+      <div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid #eee">
+        <div style="flex:1;min-width:200px;font-weight:600">{{ it.filename }}</div>
+        <div style="width:80px;text-align:center">{{ it.year or 'Unknown' }}</div>
+        <div style="width:160px">{{ it.sender }}</div>
+        <div style="width:120px;text-align:center">{{ it.department or '-' }}</div>
+        <div style="width:60px;text-align:center">{% if it.circular_number %}{{ '%02d'|format(it.circular_number) }}{% else %}-{% endif %}</div>
+        <div style="flex:1;min-width:220px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><code title="{{ it.filepath }}">{{ it.filepath }}</code></div>
+      </div>
+      {% endfor %}
+    </div>
   </body>
 </html>
