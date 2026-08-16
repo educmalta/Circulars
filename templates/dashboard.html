@@ -39,18 +39,8 @@
       </form>
     </div>
 
-    <h2 style="margin-top:6px;color:#0b5cff;">By Year and Sender</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
-      {% for g in groups %}
-      <div style="background:#f0f6ff;border-left:6px solid #0b5cff;padding:12px;border-radius:6px">
-        <div style="font-weight:700;color:#03306f">{{ g.year or 'Unknown' }}</div>
-        <div style="font-size:14px;color:#222;margin-top:6px">{{ g.sender }}</div>
-        <div style="font-size:22px;font-weight:700;color:#0b5cff;margin-top:8px">{{ g.count }}</div>
-      </div>
-      {% endfor %}
-    </div>
 
-    <h2 style="margin-top:18px;color:#0b5cff;">All Items</h2>
+    <h2 style="margin-top:18px;color:#0b5cff;">{% if selected_dept %}{{ selected_dept }} Circulars{% elif selected_year %}Circulars - {{ selected_year }}{% else %}All Items{% endif %}</h2>
     <div style="display:flex;flex-direction:column;gap:6px">
       {% for it in items %}
       <div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid #eee">
