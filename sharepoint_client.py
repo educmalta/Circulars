@@ -1,12 +1,9 @@
-"""Minimal Microsoft Graph device-code client to download files from a SharePoint/OneDrive folder.
+﻿"""Microsoft Graph device-code client to download files from a SharePoint/OneDrive folder (recursive).
 
 Usage:
-- Set environment variable GRAPH_CLIENT_ID to a registered app's client id (public client). If not set, the code will still attempt MSAL device flow but some tenants require a client id.
-- Call sync_sharepoint_folder(site_drive_path, local_target_folder) to download matching PDF/DOCX files from the target path to local folder.
-
-Notes:
-- This is optional; the recommended approach remains to sync the SharePoint folder locally with OneDrive and point CIRCULAR_RAW_FOLDERS to that local path.
-- Device code flow will prompt the operator to open a URL and enter a code to grant the app permissions.
+- Set GRAPH_CLIENT_ID (optional) and GRAPH_TENANT (optional) as env vars.
+- Call sync_sharepoint_folder(remote_path, local_target_folder) to recursively download PDF/DOCX/DOC files from remote path and all subfolders.
+- This uses device-code flow which needs interactive approval the first time.
 """
 import os
 import sys
@@ -23,38 +20,58 @@ TENANT = os.environ.get('GRAPH_TENANT', 'common')
 GRAPH_AUTHORITY = f"https://login.microsoftonline.com/{TENANT}"
 GRAPH_API = "https://graph.microsoft.com/v1.0"
 
-# Helper: perform device-code flow and return access token
+
 def acquire_token_device():
     app = PublicClientApplication(client_id=CLIENT_ID or "", authority=GRAPH_AUTHORITY)
     flow = app.initiate_device_flow(scopes=GRAPH_SCOPES)
     if 'user_code' not in flow:
         raise RuntimeError('Failed to start device code flow: ' + json.dumps(flow))
-    print('To sign in, open', flow['verification_uri'], 'and enter code:', flow['user_code'])
-    # poll
+    print('To sign in, open:', flow['verification_uri'])
+    print('Enter code:', flow['user_code'])
     result = app.acquire_token_by_device_flow(flow)
     if 'access_token' in result:
         return result['access_token']
     raise RuntimeError('Failed to acquire token: ' + json.dumps(result))
 
 
-def list_drive_items_by_path(access_token, drive_id=None, site_id=None, path=None):
-    headers = {'Authorization': f'Bearer {access_token}'}
-    # If site_id provided, use /sites/{site_id}/drive/root:/path:/children
-    if site_id:
-        url = f"{GRAPH_API}/sites/{site_id}/drive/root:/{path}:/children"
-    elif drive_id:
-        url = f"{GRAPH_API}/drives/{drive_id}/root:/{path}:/children"
-    else:
+def list_children(access_token, path=None):
+    """Yield items directly under the specified path (handles pagination)."""
+    if path:
         url = f"{GRAPH_API}/me/drive/root:/{path}:/children"
-    resp = requests.get(url, headers=headers)
-    resp.raise_for_status()
-    return resp.json().get('value', [])
+    else:
+        url = f"{GRAPH_API}/me/drive/root/children"
+    while url:
+        resp = requests.get(url, headers={'Authorization': f'Bearer {access_token}'})
+        resp.raise_for_status()
+        data = resp.json()
+        for item in data.get('value', []):
+            yield item
+        url = data.get('@odata.nextLink')
+
+
+def list_drive_items_recursive(access_token, base_path=None):
+    """Recursively yield (rel_path, item) for all items under base_path."""
+    def _recurse(current_path, rel_prefix=''):
+        for item in list_children(access_token, current_path):
+            name = item.get('name')
+            if item.get('folder'):
+                new_path = f"{current_path}/{name}" if current_path else name
+                new_rel = os.path.join(rel_prefix, name) if rel_prefix else name
+                # yield folder marker
+                yield (new_rel, item)
+                yield from _recurse(new_path, new_rel)
+            else:
+                rel = os.path.join(rel_prefix, name) if rel_prefix else name
+                yield (rel, item)
+    start = base_path.strip('/') if base_path else ''
+    yield from _recurse(start, '')
 
 
 def download_item(access_token, download_url, target_path):
     headers = {'Authorization': f'Bearer {access_token}'}
     with requests.get(download_url, headers=headers, stream=True) as r:
         r.raise_for_status()
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
         with open(target_path, 'wb') as f:
             for chunk in r.iter_content(chunk_size=8192):
                 if chunk:
@@ -62,42 +79,33 @@ def download_item(access_token, download_url, target_path):
 
 
 def sync_sharepoint_folder(remote_path, local_target_folder):
-    """Sync files from a SharePoint/OneDrive remote folder path (relative) into a local folder.
-
-    remote_path: like 'Documents/Circulars/2026' or 'Circulars/2026'
-    local_target_folder: local folder to save files
-    """
+    """Recursively download files from remote_path into local_target_folder, preserving folder structure."""
     os.makedirs(local_target_folder, exist_ok=True)
     token = acquire_token_device()
-    # list items
-    items = list_drive_items_by_path(token, path=remote_path)
     downloaded = []
-    for item in items:
+    for rel, item in list_drive_items_recursive(token, remote_path):
+        # skip folders
         if item.get('folder'):
             continue
         name = item.get('name', '')
         if not name.lower().endswith(('.pdf', '.docx', '.doc')):
             continue
-        # get downloadUrl if provided in @microsoft.graph.downloadUrl
         dl = item.get('@microsoft.graph.downloadUrl')
-        target = os.path.join(local_target_folder, name)
+        local_path = os.path.join(local_target_folder, rel)
         try:
             if dl:
-                download_item(token, dl, target)
-                downloaded.append(target)
+                download_item(token, dl, local_path)
             else:
-                # fallback: use content endpoint
                 drive_item_id = item.get('id')
                 url = f"{GRAPH_API}/me/drive/items/{drive_item_id}/content"
-                download_item(token, url, target)
-                downloaded.append(target)
+                download_item(token, url, local_path)
+            downloaded.append(local_path)
         except Exception as e:
             print('Failed to download', name, e)
     return downloaded
 
 
 if __name__ == '__main__':
-    # quick CLI for manual sync
     if len(sys.argv) < 3:
         print('Usage: python sharepoint_client.py <remote_path> <local_target_folder>')
         sys.exit(1)
