@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from flask import Flask, render_template, redirect, url_for, jsonify, request
 from dateutil import parser as dateparser
-from processor import scan_folder, DB_PATH, RAW_FOLDER, init_db
+from processor import scan_folder, DB_PATH, RAW_FOLDER, RAW_FOLDERS, init_db
 
 app = Flask(__name__)
 
@@ -19,7 +19,7 @@ SCAN_INTERVAL = 30  # seconds
 def background_scanner():
     while True:
         try:
-            scan_folder(RAW_FOLDER, DB_PATH)
+            scan_folder(RAW_FOLDERS, DB_PATH)
         except Exception as e:
             print('Scan error:', e)
         time.sleep(SCAN_INTERVAL)
@@ -34,7 +34,7 @@ def index():
 def dashboard():
     selected_year = request.args.get('year')
     selected_dept = request.args.get('department')
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     cur = conn.cursor()
     # list available years and departments for selectors
     cur.execute('SELECT DISTINCT year FROM circulars WHERE year IS NOT NULL ORDER BY year DESC')
@@ -74,7 +74,7 @@ def dashboard():
 def deadlines():
     selected_year = request.args.get('year')
     selected_dept = request.args.get('department')
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     cur = conn.cursor()
     # lists for selectors
     cur.execute('SELECT DISTINCT year FROM circulars WHERE year IS NOT NULL ORDER BY year DESC')
@@ -126,15 +126,24 @@ def deadlines():
         # use absolute distance for sorting magnitude but keep sign to prefer upcoming
         items.append({'id': r[0], 'filename': r[1], 'filepath': r[2], 'best_deadline': best.isoformat(), 'best_deadline_display': best.strftime('%d %b %Y'), 'days_distance': abs(delta), 'days_until': delta})
     # sort by upcoming first (negative distances mean past); prefer soonest upcoming then closest past
-    items.sort(key=lambda x: (x['days_until'] < 0, abs(x['days_until']), x['best_deadline']))
+    items.sort(key=lambda x: (x['days_until'] < 0, x['best_deadline']))
     return render_template('deadlines.html', items=items, years=years, departments=departments)
 
 
 @app.route('/rescan')
 def rescan():
     try:
-        scan_folder(RAW_FOLDER, DB_PATH)
-        conn = sqlite3.connect(DB_PATH)
+        scan_folder(RAW_FOLDERS, DB_PATH)
+    except Exception:
+        pass
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/api/rescan')
+def api_rescan():
+    try:
+        scan_folder(RAW_FOLDERS, DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=30)
         cur = conn.cursor()
         cur.execute('SELECT COUNT(*) FROM circulars')
         total = cur.fetchone()[0]
@@ -144,6 +153,32 @@ def rescan():
         depts = { (r[0] if r[0] else 'Unknown'): r[1] for r in cur.fetchall() }
         conn.close()
         return jsonify({'status': 'ok', 'total': total, 'with_deadlines': with_deadlines, 'departments': depts})
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+# Optional: trigger a SharePoint/OneDrive remote sync into a local folder, then scan
+try:
+    from sharepoint_client import sync_sharepoint_folder
+except Exception:
+    sync_sharepoint_folder = None
+
+@app.route('/sync_sharepoint', methods=['POST'])
+def sync_sharepoint():
+    if sync_sharepoint_folder is None:
+        return jsonify({'status': 'error', 'error': 'sharepoint_client not available; install msal and requests'}), 500
+    remote_path = request.form.get('remote_path') or request.args.get('remote_path')
+    if not remote_path:
+        return jsonify({'status': 'error', 'error': 'remote_path parameter required'}), 400
+    # local target
+    target_root = os.path.join(os.path.dirname(__file__), 'sharepoint_downloads')
+    safe_name = remote_path.replace('/', '_').replace('\\', '_')
+    local_target = os.path.join(target_root, safe_name)
+    try:
+        files = sync_sharepoint_folder(remote_path, local_target)
+        # scan both the downloaded folder and the normal RAW_FOLDERS so items are recorded
+        scan_folder([local_target] + RAW_FOLDERS, DB_PATH)
+        return jsonify({'status': 'ok', 'downloaded': len(files), 'sample': files[:10]})
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
