@@ -40,6 +40,10 @@ def get_raw_folders():
     onedrive_ministry = os.path.join(user_home, 'OneDrive - Ministry for Education and Sport', 'Circulars')
     if onedrive_ministry not in configured:
         configured.append(onedrive_ministry)
+    # also include the user's Downloads folder to catch email attachments saved locally
+    downloads = os.path.join(user_home, 'Downloads')
+    if downloads not in configured:
+        configured.append(downloads)
 
     # filter out non-existing entries but return normalized absolute paths
     out = []
@@ -57,26 +61,28 @@ def get_raw_folders():
             final.append(p)
             seen.add(p)
 
-    # Only keep the two authoritative roots if they exist; order: desktop raw, oneDrive ministry
+    # Keep authoritative roots if they exist; order: desktop raw, OneDrive ministry, Downloads
     allowed = []
     desktop = os.path.abspath(os.path.expanduser(DEFAULT_RAW_FOLDER)) if DEFAULT_RAW_FOLDER else None
     if desktop and desktop in final:
         allowed.append(desktop)
-    onedrive_min = os.path.abspath(os.path.expanduser(os.path.join(os.path.expanduser('~'), 'OneDrive - Ministry for Education and Sport', 'Circulars')))
+    onedrive_min = os.path.abspath(os.path.expanduser(os.path.join(user_home, 'OneDrive - Ministry for Education and Sport', 'Circulars')))
     if onedrive_min and onedrive_min in final:
         allowed.append(onedrive_min)
+    if downloads and downloads in final and downloads not in allowed:
+        allowed.append(downloads)
     # fallback: if none exist, return whatever final resolved
     return allowed if allowed else final
 
 
 # helper to validate filenames: must start with DEPT NUM[._/- or space]YEAR e.g. DSVP 01/2026 or RSIRD 04_2026_EN
-FILENAME_PATTERN = re.compile(r"^\s*(?:[A-Z]{2,8}(?:\s+[A-Z]{2,8})*)\s+\d{1,4}\s*(?:[._/\-]|\s)\s*\d{4}", re.IGNORECASE)
+FILENAME_PATTERN = re.compile(r"^\s*(?:[A-Z]{2,8}(?:\s+[A-Z]{2,8})*)[._/\-\s]*\d{1,4}[._/\-\s]*\d{4}", re.IGNORECASE)
 
 
 def parse_filename_reference(filename):
     name = os.path.splitext(filename)[0]
     # Accept multi-token uppercase departments like 'DG DES' or 'NLA' but require uppercase tokens
-    match = re.search(r"\b((?:[A-Z]{2,8}(?:\s+[A-Z]{2,8})*))\s*(?:No\s*\.?\s*)?(\d{1,4})\s*(?:[._/\-\s]+)\s*(\d{4})\b", name)
+    match = re.search(r"\b((?:[A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})\b", name)
     if not match:
         return None
     dept_raw = match.group(1)
@@ -299,7 +305,7 @@ def deep_extract_reference(text):
         s = text
     # Look for patterns like 'DG DES 24/2026' or 'NLA 43 June 2026'
     # First try strict numeric year
-    patt = re.compile(r"([A-Z]{2,8}(?:\s+[A-Z]{2,8})*)\s*(?:No\s*\.?\s*)?(\d{1,4})\s*(?:[._/\-]|\s+)\s*(\d{4})")
+    patt = re.compile(r"([A-Z]{2,8}(?:\s+[A-Z]{2,8})*)[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})")
     m = patt.search(s)
     if m:
         dept_raw = m.group(1)
@@ -313,7 +319,7 @@ def deep_extract_reference(text):
             if num <= 9999 and yr >= 2000:
                 return dept, num, yr
     # Fallback: department + number + month/year (e.g., 'NLA 43 June 2026')
-    patt2 = re.compile(r"([A-Z]{2,8}(?:\s+[A-Z]{2,8})*)\s*(\d{1,4})\s+([A-Za-z]{3,}\s+\d{4})")
+    patt2 = re.compile(r"([A-Z]{2,8}(?:\s+[A-Z]{2,8})*)[._/\-\s]+(\d{1,4})\s+([A-Za-z]{3,}\s+\d{4})")
     m2 = patt2.search(s)
     if m2:
         dept_raw = m2.group(1)
@@ -334,9 +340,9 @@ def deep_extract_reference(text):
 def extract_reference_from_text(text):
     # Accept variations like 'IPS No. 02/2026', 'IPS No . 02/2026', 'DGPM 14 2026', 'Ref: DGPM 14/2026' and multi-token departments
     patterns = [
-        r"\b(?:ref(?:er(?:en[cz]a|ence))?)\s*[:\-]?\s*(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))\s*(?:No\s*\.?\s*)?(\d{1,4})\s*(?:[._/\-]|\s+)\s*(\d{4})",
-        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))\s*(?:No\s*\.?\s*)?(\d{1,4})\s*(?:[._/\-]|\s+)\s*(\d{4})",
-        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))\s+No\s*\.?\s*(\d{1,4})\s*(?:[._/\-]|\s+)\s*(\d{4})",
+        r"\b(?:ref(?:er(?:en[cz]a|ence))?)\s*[:\-]?\s*(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})",
+        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})",
+        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]+No\s*\.?\s*(\d{1,4})[._/\-\s]*?(\d{4})",
     ]
     for pattern in patterns:
         match = re.search(pattern, text)

@@ -264,4 +264,17 @@ if __name__ == '__main__':
     # start background scanner thread
     t = threading.Thread(target=background_scanner, daemon=True)
     t.start()
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    # open dashboard in user's default browser after server starts
+    try:
+        import webbrowser, threading as _thr, time as _time
+        def _open():
+            _time.sleep(1.0)
+            try:
+                webbrowser.open('http://127.0.0.1:5000/dashboard')
+            except Exception:
+                pass
+        _thr.Thread(target=_open, daemon=True).start()
+    except Exception:
+        pass
+    # run without the reloader to avoid multiple processes and extra console windows
+    app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
