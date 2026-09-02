@@ -544,8 +544,27 @@ def _cleanup_db(cur, folder_list):
                 cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
                 continue
             if is_maltese_filename(fn or ''):
-                cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
-                continue
+                # Keep Maltese files only if there is no English counterpart for the same (department, number, year).
+                # If the row lacks department/number/year, retain it for manual review.
+                if dept and num and year:
+                    cur.execute('SELECT id, snippet FROM circulars WHERE department=? AND circular_number=? AND year=?', (dept, num, year))
+                    others = [r for r in cur.fetchall() if r[0] != rid]
+                    deleted = False
+                    for oid, osnip in others:
+                        # if any other item in the group is not Maltese, it's safe to drop this Maltese file
+                        if not is_maltese_text(osnip or ''):
+                            cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
+                            deleted = True
+                            break
+                    if deleted:
+                        continue
+                    # otherwise keep this Maltese record (no English counterpart found)
+                else:
+                    # keep files without clear dept/number/year so an admin can review them
+                    pass
+                
+                        
+
 
         # Keep exactly one row for each (department, circular_number, year), preferring English / most recent.
         cur.execute('SELECT id, department, circular_number, year, snippet, last_modified FROM circulars ORDER BY year DESC, department ASC, circular_number ASC')
