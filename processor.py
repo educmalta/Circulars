@@ -44,6 +44,13 @@ def get_raw_folders():
     downloads = os.path.join(user_home, 'Downloads')
     if downloads not in configured:
         configured.append(downloads)
+    # include common Outlook/temporary attachment locations to help catch email attachments
+    outlook_cache = os.path.join(user_home, 'AppData', 'Local', 'Microsoft', 'Windows', 'INetCache', 'Content.Outlook')
+    outlook_temp = os.path.join(user_home, 'AppData', 'Local', 'Temp')
+    if outlook_cache not in configured:
+        configured.append(outlook_cache)
+    if outlook_temp not in configured:
+        configured.append(outlook_temp)
 
     # filter out non-existing entries but return normalized absolute paths
     out = []

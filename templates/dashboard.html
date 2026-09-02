@@ -47,7 +47,7 @@
     <div style="display:flex;flex-direction:column;gap:6px">
       {% for it in items %}
       <div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid #eee">
-        <div style="flex:1;min-width:200px;font-weight:600">{{ it.filename }}</div>
+        <div style="flex:1;min-width:200px;font-weight:600">{{ it.filename }} {% if it.maltese %}<span style="color:#c62828;font-weight:700;margin-left:8px">[MT]</span>{% endif %}</div>
         <div style="width:80px;text-align:center">{{ it.year or 'Unknown' }}</div>
         <div style="width:160px">{{ it.sender }}</div>
         <div style="width:120px;text-align:center">{{ it.department or '-' }}</div>

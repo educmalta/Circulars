@@ -136,6 +136,7 @@ def dashboard():
             'sender': v['sender'],
             'department': v['department'],
             'circular_number': v['circular_number'],
+            'maltese': v.get('maltese', False),
         }
         for v in seen.values()
     ], key=lambda x: (-(x['year'] or 0), -int(x.get('circular_number') or 0)))
