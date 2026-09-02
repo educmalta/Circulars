@@ -214,7 +214,68 @@ def text_from_pdf(path):
         return ocr_joined
     except Exception:
         # OCR not available or failed
-        return joined or ""
+        pass
+    return joined or ""
+
+
+# New: extract attachments from .eml/.msg files if present
+def extract_attachments_from_eml(eml_path, target_dir=None):
+    """Parse .eml file and extract attachments to target_dir. Returns list of saved paths."""
+    import email
+    from email import policy
+    import os
+    if target_dir is None:
+        target_dir = os.path.join(os.path.dirname(__file__), 'tmp_attachments')
+    os.makedirs(target_dir, exist_ok=True)
+    saved = []
+    try:
+        with open(eml_path, 'rb') as f:
+            msg = email.message_from_binary_file(f, policy=policy.default)
+        for part in msg.iter_attachments():
+            filename = part.get_filename()
+            if not filename:
+                continue
+            payload = part.get_payload(decode=True)
+            if not payload:
+                continue
+            safe_name = filename.replace('/', '_').replace('..', '')
+            outpath = os.path.join(target_dir, safe_name)
+            try:
+                with open(outpath, 'wb') as out:
+                    out.write(payload)
+                saved.append(outpath)
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return saved
+
+
+def extract_attachments_from_msg(msg_path, target_dir=None):
+    """Attempt to extract attachments from .msg files using extract_msg if available. Returns list of saved paths."""
+    import os
+    if target_dir is None:
+        target_dir = os.path.join(os.path.dirname(__file__), 'tmp_attachments')
+    os.makedirs(target_dir, exist_ok=True)
+    saved = []
+    try:
+        import extract_msg
+        msg = extract_msg.Message(msg_path)
+        for att in msg.attachments:
+            try:
+                filename = att.longFilename or att.shortFilename
+                if not filename:
+                    continue
+                outpath = os.path.join(target_dir, filename.replace('/', '_').replace('..', ''))
+                with open(outpath, 'wb') as out:
+                    out.write(att.data)
+                saved.append(outpath)
+            except Exception:
+                continue
+    except Exception:
+        # extract_msg not available; cannot parse .msg files
+        return []
+    return saved
 
 
 def _replace_maltese_months(s):
@@ -423,8 +484,8 @@ def scan_folder(folder=None, db_path=DB_PATH):
                             continue
                     except Exception:
                         pass
-                    # only accept PDF/DOCX
-                    if not (lower.endswith('.docx') or lower.endswith('.pdf')):
+                    # accept PDF/DOCX/EML/MSG
+                    if not (lower.endswith('.docx') or lower.endswith('.pdf') or lower.endswith('.eml') or lower.endswith('.msg')):
                         continue
                     path = os.path.join(root, fn)
                     try:
@@ -432,81 +493,109 @@ def scan_folder(folder=None, db_path=DB_PATH):
                     except Exception:
                         continue
 
-                    # Read text early so we can accept files where the content contains a department ref
-                    if lower.endswith('.docx'):
-                        text = text_from_docx(path)
-                    else:
-                        text = text_from_pdf(path)
+                    # helper to handle a discovered candidate file (pdf/docx attachment or original docx/pdf)
+                    def handle_candidate_file(path, fn, mtime, text=None):
+                        # Read text early if not provided
+                        if text is None:
+                            if fn.lower().endswith('.docx'):
+                                file_text = text_from_docx(path)
+                            else:
+                                file_text = text_from_pdf(path)
+                        else:
+                            file_text = text
 
-                    # If filename doesn't match, allow the file only if content contains a valid reference like 'IPS 02/2026'
-                    ref_from_content = extract_reference_from_text(fn + ' ' + text)
-                    if not is_allowed_filename(fn) and not ref_from_content:
-                        # skip unrelated attachments or exports
-                        continue
-                    # If filename looks Maltese, keep only if content contains a valid reference
-                    if is_maltese_filename(fn) and not ref_from_content:
-                        continue
+                        # If filename doesn't match, allow the file only if content contains a valid reference like 'IPS 02/2026'
+                        ref_from_content = extract_reference_from_text(fn + ' ' + (file_text or ''))
+                        if not is_allowed_filename(fn) and not ref_from_content:
+                            # skip unrelated attachments or exports
+                            return
+                        # If filename looks Maltese, keep only if content contains a valid reference
+                        if is_maltese_filename(fn) and not ref_from_content:
+                            return
 
-                    cur.execute('SELECT last_modified, deadlines FROM circulars WHERE filepath=?', (path,))
-                    row = cur.fetchone()
+                        cur.execute('SELECT last_modified, deadlines FROM circulars WHERE filepath=?', (path,))
+                        row = cur.fetchone()
 
-                    snippet = (text[:800] + '...') if len(text) > 800 else text
-                    dates = find_dates(text)
+                        snippet = (file_text[:800] + '...') if len(file_text) > 800 else (file_text or '')
+                        dates = find_dates(file_text)
 
-                    # Try to parse filename patterns like 'DGPM 14/2026' or 'DES 23.2025'
-                    ref = ref_from_content
-                    if not ref:
-                        ref = extract_reference_from_text(fn + ' ' + text)
-                    department = None
-                    circular_num = None
-                    year = None
-                    if ref:
-                        department, circular_num, year = ref
-                    # explicit guard: do not accept standalone 4000 values without a department code
-                    if circular_num and circular_num > 999:
-                        circular_num = None
+                        # parse reference
+                        ref = ref_from_content
+                        if not ref:
+                            ref = extract_reference_from_text(fn + ' ' + (file_text or ''))
                         department = None
+                        circular_num = None
+                        year = None
+                        if ref:
+                            department, circular_num, year = ref
 
-                    # sender fallback
-                    sender = department if department else guess_sender(text)
-
-                    # normalize department to uppercase without surrounding whitespace
-                    if department:
-                        try:
-                            department = department.strip().upper()
-                        except Exception:
-                            pass
-                        if department in FORBIDDEN_DEPARTMENTS:
+                        # explicit guard: do not accept standalone 4000 values without a department code
+                        if circular_num and circular_num > 999:
+                            circular_num = None
                             department = None
 
-                    # derive year if still missing
-                    if year is None:
-                        year_match = re.search(r"(19|20)\d{2}", fn)
-                        if year_match:
-                            year = int(year_match.group(0))
-                        elif dates:
+                        # sender fallback
+                        sender = department if department else guess_sender(file_text or '')
+
+                        # normalize department to uppercase without surrounding whitespace
+                        if department:
                             try:
-                                year = int(dates[0][:4])
+                                department = department.strip().upper()
                             except Exception:
                                 pass
-                        else:
-                            try:
-                                year = datetime.fromtimestamp(mtime).year
-                            except Exception:
-                                year = None
+                            if department in FORBIDDEN_DEPARTMENTS:
+                                department = None
 
-                    # If we have department, number, year, prefer single DB record per group.
-                    if department and circular_num and year:
-                        cur.execute('SELECT id, last_modified FROM circulars WHERE department=? AND circular_number=? AND year=?', (department, circular_num, year))
-                        grp = cur.fetchone()
-                        if grp:
-                            existing_id, existing_mtime = grp[0], grp[1] or 0
-                            # Remove any stale row that points at the same filepath before updating.
-                            cur.execute('DELETE FROM circulars WHERE filepath=? AND id<>?', (path, existing_id))
-                            # Recompute data on every rescan so corrected deadline parsing is reflected immediately.
-                            cur.execute('''UPDATE circulars SET filepath=?, filename=?, year=?, sender=?, deadlines=?, snippet=?, last_modified=?, department=?, circular_number=? WHERE id=?''', (path, fn, year, sender, json.dumps(dates), snippet, mtime, department, circular_num, existing_id))
-                            # remove any other records in the group (keep this updated one)
-                            cur.execute('DELETE FROM circulars WHERE department=? AND circular_number=? AND year=? AND id<>?', (department, circular_num, year, existing_id))
+                        # derive year if still missing
+                        if year is None:
+                            year_match = re.search(r"(19|20)\d{2}", fn)
+                            if year_match:
+                                year = int(year_match.group(0))
+                            elif dates:
+                                try:
+                                    year = int(dates[0][:4])
+                                except Exception:
+                                    pass
+                            else:
+                                try:
+                                    year = datetime.fromtimestamp(mtime).year
+                                except Exception:
+                                    year = None
+
+                        # persist to DB (same logic as before)
+                        if department and circular_num and year:
+                            cur.execute('SELECT id, last_modified FROM circulars WHERE department=? AND circular_number=? AND year=?', (department, circular_num, year))
+                            grp = cur.fetchone()
+                            if grp:
+                                existing_id, existing_mtime = grp[0], grp[1] or 0
+                                # Remove any stale row that points at the same filepath before updating.
+                                cur.execute('DELETE FROM circulars WHERE filepath=? AND id<>?', (path, existing_id))
+                                # Recompute data on every rescan so corrected deadline parsing is reflected immediately.
+                                cur.execute('''UPDATE circulars SET filepath=?, filename=?, year=?, sender=?, deadlines=?, snippet=?, last_modified=?, department=?, circular_number=? WHERE id=?''', (path, fn, year, sender, json.dumps(dates), snippet, mtime, department, circular_num, existing_id))
+                                # remove any other records in the group (keep this updated one)
+                                cur.execute('DELETE FROM circulars WHERE department=? AND circular_number=? AND year=? AND id<>?', (department, circular_num, year, existing_id))
+                            else:
+                                cur.execute('''
+                                    INSERT INTO circulars (filepath, filename, year, sender, deadlines, snippet, last_modified, department, circular_number)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    ON CONFLICT(filepath) DO UPDATE SET
+                                      filename=excluded.filename,
+                                      year=excluded.year,
+                                      sender=excluded.sender,
+                                      deadlines=excluded.deadlines,
+                                      snippet=excluded.snippet,
+                                      last_modified=excluded.last_modified,
+                                      department=excluded.department,
+                                      circular_number=excluded.circular_number
+                                ''', (path, fn, year, sender, json.dumps(dates), snippet, mtime, department, circular_num))
+                                # after insert, remove other duplicates leaving the inserted row
+                                cur.execute('SELECT id FROM circulars WHERE department=? AND circular_number=? AND year=?', (department, circular_num, year))
+                                ids = [r[0] for r in cur.fetchall()]
+                                if len(ids) > 1:
+                                    # keep the most recent id
+                                    cur.execute('SELECT id FROM circulars WHERE department=? AND circular_number=? AND year=? ORDER BY last_modified DESC LIMIT 1', (department, circular_num, year))
+                                    keep = cur.fetchone()[0]
+                                    cur.execute('DELETE FROM circulars WHERE department=? AND circular_number=? AND year=? AND id<>?', (department, circular_num, year, keep))
                         else:
                             cur.execute('''
                                 INSERT INTO circulars (filepath, filename, year, sender, deadlines, snippet, last_modified, department, circular_number)
@@ -521,28 +610,37 @@ def scan_folder(folder=None, db_path=DB_PATH):
                                   department=excluded.department,
                                   circular_number=excluded.circular_number
                             ''', (path, fn, year, sender, json.dumps(dates), snippet, mtime, department, circular_num))
-                            # after insert, remove other duplicates leaving the inserted row
-                            cur.execute('SELECT id FROM circulars WHERE department=? AND circular_number=? AND year=?', (department, circular_num, year))
-                            ids = [r[0] for r in cur.fetchall()]
-                            if len(ids) > 1:
-                                # keep the most recent id
-                                cur.execute('SELECT id FROM circulars WHERE department=? AND circular_number=? AND year=? ORDER BY last_modified DESC LIMIT 1', (department, circular_num, year))
-                                keep = cur.fetchone()[0]
-                                cur.execute('DELETE FROM circulars WHERE department=? AND circular_number=? AND year=? AND id<>?', (department, circular_num, year, keep))
-                    else:
-                        cur.execute('''
-                            INSERT INTO circulars (filepath, filename, year, sender, deadlines, snippet, last_modified, department, circular_number)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ON CONFLICT(filepath) DO UPDATE SET
-                              filename=excluded.filename,
-                              year=excluded.year,
-                              sender=excluded.sender,
-                              deadlines=excluded.deadlines,
-                              snippet=excluded.snippet,
-                              last_modified=excluded.last_modified,
-                              department=excluded.department,
-                              circular_number=excluded.circular_number
-                        ''', (path, fn, year, sender, json.dumps(dates), snippet, mtime, department, circular_num))
+
+                    # If this is an email file, try to extract attachments and process them
+                    if lower.endswith('.eml'):
+                        try:
+                            atts = extract_attachments_from_eml(path)
+                            for ap in atts:
+                                afn = os.path.basename(ap)
+                                try:
+                                    amt = os.path.getmtime(ap)
+                                except Exception:
+                                    amt = mtime
+                                handle_candidate_file(ap, afn, amt)
+                        except Exception:
+                            pass
+                        continue
+                    if lower.endswith('.msg'):
+                        try:
+                            atts = extract_attachments_from_msg(path)
+                            for ap in atts:
+                                afn = os.path.basename(ap)
+                                try:
+                                    amt = os.path.getmtime(ap)
+                                except Exception:
+                                    amt = mtime
+                                handle_candidate_file(ap, afn, amt)
+                        except Exception:
+                            pass
+                        continue
+
+                    # Normal processing for pdf/docx files
+                    handle_candidate_file(path, fn, mtime)
 
                     # finished processing this file; continue to next
                     continue
