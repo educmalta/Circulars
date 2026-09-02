@@ -4,57 +4,76 @@
     <meta charset="utf-8" />
     <title>Circulars Dashboard</title>
     <style>
-      body{font-family:Segoe UI, Arial; margin:20px}
-      table{border-collapse:collapse;width:100%}
-      th,td{border:1px solid #ddd;padding:8px}
-      th{background:#f4f4f4}
-      .group{margin-bottom:20px}
+      :root{--brand:#0b5cff;--muted:#666;--card:#fff;--bg:#f7f9fc}
+      html,body{height:100%}
+      body{font-family:Inter, 'Segoe UI', Arial, sans-serif; margin:20px; background:var(--bg); color:#222}
+      .container{max-width:1100px;margin:0 auto}
+      header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+      h1{color:var(--brand);font-size:32px;margin:0}
+      .controls{display:flex;gap:10px;align-items:center}
+      button, .btn{background:var(--brand);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
+      button.secondary{background:#fff;color:var(--brand);border:1px solid var(--brand)}
+      .filters{display:flex;gap:12px;align-items:center;margin:12px 0}
+      .card{background:var(--card);border-radius:8px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+      .list-row{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid #eee}
+      .list-row:hover{background:#fbfdff}
+      .filename{flex:1;min-width:220px;font-weight:600}
+      .meta{width:90px;text-align:center;color:var(--muted)}
+      .dept{width:120px}
+      .num{width:60px;text-align:center}
+      .path{flex:1;min-width:220px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      a.path-link{color:#0b66d1;text-decoration:none}
+      a.path-link:hover{text-decoration:underline}
     </style>
   </head>
   <body>
-    <h1 style="color:#0b5cff;">Circulars Dashboard</h1>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0">
-      <a href="/deadlines">View Deadlines</a>
-      <form method="post" action="/rescan" style="margin:0;display:inline"><button type="submit">Rescan Now</button></form>
-    </div>
+    <div class="container">
+      <header>
+        <h1>Circulars Dashboard</h1>
+        <div class="controls">
+          <a href="/deadlines" class="btn secondary" style="text-decoration:none;padding:6px 10px;border-radius:6px">View Deadlines</a>
+          <form method="post" action="/rescan" style="margin:0;display:inline"><button type="submit" class="btn">Rescan Now</button></form>
+        </div>
+      </header>
 
-    <div style="display:flex;align-items:center;gap:12px;margin:18px 0">
-      <form id="filterForm" method="get" action="/dashboard" style="display:flex;align-items:center;gap:8px">
-        <label for="year">Year:</label>
-        <select id="year" name="year" onchange="document.getElementById('filterForm').submit()">
-          <option value="">All years</option>
-          {% for y in years %}
-            <option value="{{ y }}" {% if selected_year and (selected_year|int)==y %}selected{% endif %}>{{ y }}</option>
-          {% endfor %}
-        </select>
+      <div class="filters">
+        <form id="filterForm" method="get" action="/dashboard" style="display:flex;align-items:center;gap:8px">
+          <label for="year">Year:</label>
+          <select id="year" name="year" onchange="document.getElementById('filterForm').submit()">
+            <option value="">All years</option>
+            {% for y in years %}
+              <option value="{{ y }}" {% if selected_year and (selected_year|int)==y %}selected{% endif %}>{{ y }}</option>
+            {% endfor %}
+          </select>
 
-        <label for="department" style="margin-left:8px">Department:</label>
-        <select id="department" name="department" onchange="document.getElementById('filterForm').submit()">
-          <option value="">All</option>
-          {% for d in departments %}
-            <option value="{{ d }}" {% if selected_dept and selected_dept==d %}selected{% endif %}>{{ d }}</option>
-          {% endfor %}
-        </select>
+          <label for="department" style="margin-left:8px">Department:</label>
+          <select id="department" name="department" onchange="document.getElementById('filterForm').submit()">
+            <option value="">All</option>
+            {% for d in departments %}
+              <option value="{{ d }}" {% if selected_dept and selected_dept==d %}selected{% endif %}>{{ d }}</option>
+            {% endfor %}
+          </select>
 
-        {% if selected_year or selected_dept %}
-          <a href="/dashboard" style="margin-left:8px;color:#555;text-decoration:none">Clear</a>
-        {% endif %}
-      </form>
-    </div>
+          {% if selected_year or selected_dept %}
+            <a href="/dashboard" style="margin-left:8px;color:#555;text-decoration:none">Clear</a>
+          {% endif %}
+        </form>
+      </div>
 
 
-    <h2 style="margin-top:18px;color:#0b5cff;">{% if selected_dept %}{{ selected_dept }} Circulars{% elif selected_year %}Circulars - {{ selected_year }}{% else %}All Items{% endif %}</h2>
-    <div style="display:flex;flex-direction:column;gap:6px">
+      <h2 style="margin-top:6px;color:var(--brand);font-size:20px">{% if selected_dept %}{{ selected_dept }} Circulars{% elif selected_year %}Circulars - {{ selected_year }}{% else %}All Items{% endif %}</h2>
+      <div class="card">
       {% for it in items %}
-      <div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid #eee">
-        <div style="flex:1;min-width:200px;font-weight:600">{{ it.filename }} {% if it.maltese %}<span style="color:#c62828;font-weight:700;margin-left:8px">[MT]</span>{% endif %}</div>
-        <div style="width:80px;text-align:center">{{ it.year or 'Unknown' }}</div>
-        <div style="width:160px">{{ it.sender }}</div>
-        <div style="width:120px;text-align:center">{{ it.department or '-' }}</div>
-        <div style="width:60px;text-align:center">{% if it.circular_number %}{{ '%02d'|format(it.circular_number) }}{% else %}-{% endif %}</div>
-        <div style="flex:1;min-width:220px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><a href="{{ it.filepath_url }}" target="_blank" rel="noopener noreferrer"><code title="{{ it.filepath }}">{{ it.filepath }}</code></a></div>
+      <div class="list-row">
+        <div class="filename">{{ it.filename }} {% if it.maltese %}<span style="color:#c62828;font-weight:700;margin-left:8px">[MT]</span>{% endif %}</div>
+        <div class="meta">{{ it.year or 'Unknown' }}</div>
+        <div class="dept">{{ it.sender }}</div>
+        <div class="meta">{{ it.department or '-' }}</div>
+        <div class="num">{% if it.circular_number %}{{ '%02d'|format(it.circular_number) }}{% else %}-{% endif %}</div>
+        <div class="path"><a class="path-link" href="{{ it.filepath_url }}" target="_blank" rel="noopener noreferrer" title="{{ it.filepath }}">{{ it.filepath|replace('\\','/') }}</a></div>
       </div>
       {% endfor %}
+      </div>
     </div>
   </body>
 </html>

@@ -3,11 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <title>Deadlines</title>
-    <style>body{font-family:Segoe UI, Arial; margin:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px}th{background:#f4f4f4}</style>
+    <style>
+      :root{--brand:#c62828;--muted:#666;--bg:#f7f9fc}
+      body{font-family:Inter, 'Segoe UI', Arial, sans-serif; margin:20px;background:var(--bg);color:#222}
+      .container{max-width:1000px;margin:0 auto}
+      h1{color:var(--brand)}
+      table{border-collapse:collapse;width:100%;background:#fff;border-radius:8px;overflow:hidden}
+      th,td{border-bottom:1px solid #eee;padding:12px;text-align:left}
+      th{background:#fafafa;color:#333}
+      a.path-link{color:#0b66d1;text-decoration:none}
+    </style>
   </head>
   <body>
-    <h1 style="color:#c62828;">Deadlines</h1>
-    <p><a href="/dashboard">Back to Dashboard</a></p>
+    <div class="container">
+      <h1>Deadlines</h1>
+      <p><a href="/dashboard" style="color:#0b66d1;">Back to Dashboard</a></p>
 
     <form method="get" action="/deadlines" style="margin:12px 0;display:flex;gap:12px;align-items:center">
       <label for="year">Year:</label>
@@ -40,7 +50,7 @@
           <td style="font-weight:600">{{ it.filename }}</td>
           <td style="color:#b71c1c;font-weight:700">{{ it.best_deadline_display }}</td>
           <td>{{ it.days_distance }}</td>
-          <td><a href="{{ it.filepath_url }}" target="_blank" rel="noopener noreferrer"><code>{{ it.filepath }}</code></a></td>
+          <td><a class="path-link" href="{{ it.filepath_url }}" target="_blank" rel="noopener noreferrer" title="{{ it.filepath }}">{{ it.filepath|replace('\\','/') }}</a></td>
         </tr>
         {% endfor %}
       </tbody>
