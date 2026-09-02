@@ -124,14 +124,25 @@ def dashboard():
             continue
         # detect Maltese via filename; this is more reliable than body-text scanning.
         maltese = is_maltese_filename(filename or '')
+        cur_item = {'rid': rid, 'filename': filename, 'filepath': filepath, 'year': year, 'sender': sender, 'department': department, 'circular_number': circular_number, 'maltese': maltese, 'last_modified': last_modified}
         if key in seen:
             prev = seen[key]
+            # If previous was maltese but this is English, prefer this
             if prev.get('maltese') and not maltese:
-                seen[key] = {'rid': rid, 'filename': filename, 'filepath': filepath, 'year': year, 'sender': sender, 'department': department, 'circular_number': circular_number, 'maltese': maltese, 'last_modified': last_modified}
-        else:
-            if maltese:
+                seen[key] = cur_item
                 continue
-            seen[key] = {'rid': rid, 'filename': filename, 'filepath': filepath, 'year': year, 'sender': sender, 'department': department, 'circular_number': circular_number, 'maltese': maltese, 'last_modified': last_modified}
+            # If previous was English and this is Maltese, skip this Maltese
+            if not prev.get('maltese') and maltese:
+                continue
+            # Otherwise prefer the most recently modified
+            try:
+                if (last_modified or 0) > (prev.get('last_modified') or 0):
+                    seen[key] = cur_item
+            except Exception:
+                pass
+        else:
+            # Keep Maltese entries if no English counterpart exists; admin can review
+            seen[key] = cur_item
 
     # collect items sorted by year desc then last_modified desc
     items = sorted([

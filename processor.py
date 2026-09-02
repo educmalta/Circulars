@@ -83,21 +83,22 @@ def get_raw_folders():
 
 
 # helper to validate filenames: must start with DEPT NUM[._/- or space]YEAR e.g. DSVP 01/2026 or RSIRD 04_2026_EN
-FILENAME_PATTERN = re.compile(r"^\s*(?:[A-Z]{2,10}(?:\s+[A-Z]{2,10})*)[._/\-\s]*\d{1,4}[._/\-\s]*\d{4}", re.IGNORECASE)
+FILENAME_PATTERN = re.compile(r"^\s*(?:[A-Z]{2,10}(?:\s+[A-Z]{2,10})*)[._/\-\s]*\d{1,4}[._/\-\s]*\d{2,4}", re.IGNORECASE)
 
 
 def parse_filename_reference(filename):
     name = os.path.splitext(filename)[0]
     # Accept multi-token uppercase departments like 'DG DES' or 'NLA' but require uppercase tokens
-    match = re.search(r"\b((?:[A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})\b", name)
+    match = re.search(r"\b((?:[A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{2,4})\b", name)
     if not match:
         return None
     dept_raw = match.group(1)
-    if any(c.islower() for c in dept_raw):
-        return None
     department = dept_raw.upper().strip()
     number = int(match.group(2))
     year = int(match.group(3))
+    # accept two-digit years like '23' -> 2023
+    if year < 100:
+        year = 2000 + year
     if number <= 9999 and year >= 2000:
         return department, number, year
     return None
@@ -193,9 +194,27 @@ def text_from_pdf(path):
         texts = []
         for page in reader.pages:
             texts.append(page.extract_text() or "")
-        return "\n".join(texts)
+        joined = "\n".join(texts)
+        if joined.strip():
+            return joined
     except Exception:
-        return ""
+        joined = ""
+    # Fallback: try OCR for image-only PDFs if pillow/pdf2image and pytesseract are available
+    try:
+        from pdf2image import convert_from_path
+        import pytesseract
+        images = convert_from_path(path, dpi=200)
+        ocr_texts = []
+        for img in images:
+            try:
+                ocr_texts.append(pytesseract.image_to_string(img))
+            except Exception:
+                ocr_texts.append('')
+        ocr_joined = "\n".join(ocr_texts)
+        return ocr_joined
+    except Exception:
+        # OCR not available or failed
+        return joined or ""
 
 
 def _replace_maltese_months(s):
@@ -315,7 +334,7 @@ def deep_extract_reference(text):
         s = text
     # Look for patterns like 'DG DES 24/2026' or 'NLA 43 June 2026'
     # First try strict numeric year
-    patt = re.compile(r'([A-Za-z]{2,10}(?:\s+[A-Za-z]{2,10})*)[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})')
+    patt = re.compile(r'([A-Za-z]{2,10}(?:\s+[A-Za-z]{2,10})*)[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{2,4})')
     m = patt.search(s)
     if m:
         dept_raw = m.group(1)
@@ -325,6 +344,8 @@ def deep_extract_reference(text):
             yr = int(m.group(3))
         except Exception:
             return None
+        if yr < 100:
+            yr = 2000 + yr
         if num <= 9999 and yr >= 2000:
             return dept, num, yr
     # Fallback: department + number + month/year (e.g., 'NLA 43 June 2026')
@@ -349,9 +370,9 @@ def deep_extract_reference(text):
 def extract_reference_from_text(text):
     # Accept variations like 'IPS No. 02/2026', 'IPS No . 02/2026', 'DGPM 14 2026', 'Ref: DGPM 14/2026' and multi-token departments
     patterns = [
-        r"\b(?:ref(?:er(?:en[cz]a|ence))?)\s*[:\-]?\s*(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})",
-        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})",
-        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]+No\s*\.?\s*(\d{1,4})[._/\-\s]*?(\d{4})",
+        r"\b(?:ref(?:er(?:en[cz]a|ence))?)\s*[:\-]?\s*(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{2,4})",
+        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{2,4})",
+        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]+No\s*\.?\s*(\d{1,4})[._/\-\s]*?(\d{2,4})",
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -360,6 +381,8 @@ def extract_reference_from_text(text):
             department = dept_text.upper().strip()
             number = int(match.group(3))
             year = int(match.group(4))
+            if year < 100:
+                year = 2000 + year
             if number <= 9999 and year >= 2000:
                 return department, number, year
     # fallback for file stems such as 'RSIRD 04_2026_EN'
