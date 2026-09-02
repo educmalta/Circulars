@@ -216,22 +216,24 @@ def is_maltese_text(text):
 
 def find_dates(text):
     # pre-clean: remove spaces inside digit groups (e.g., '202 6' -> '2026') to handle PDF extraction artifacts
+    if not text:
+        return []
     cleaned = re.sub(r'(?<=\d)\s+(?=\d)', '', text)
     lowered = cleaned.lower()
     deadline_keywords = [
         'deadline', 'not later than', 'latest date', 'latest by', 'must be received by',
         'submitted by', 'submit by', 'to be submitted by', 'to be received by',
         'application closing date', 'closing date', 'reply by', 'date of submission',
-        'submission date', 'by end of', 'before', 'forwarded by', 'by no later than', 'no later than'
+        'submission date', 'by end of', 'before', 'forwarded by', 'by no later than', 'no later than', 'closing date is'
     ]
-    issue_keywords = ['date:', 'issued on', 'issue date', 'date of issue', 'circular date', 'publication date']
+    issue_keywords = ['date:', 'issued on', 'issue date', 'date of issue', 'circular date', 'publication date', 'issued:']
     all_matches = []
     seen = set()
 
     for rx in DATE_REGEXES:
         for match in re.finditer(rx, cleaned, flags=re.IGNORECASE):
             s = match.group(0)
-            s = s.replace('\u2019', '\'') if '\u2019' in s else s
+            s = s.replace('\u2019', "'") if '\u2019' in s else s
             s = _replace_maltese_months(s)
             try:
                 dt = dateparser.parse(s, dayfirst=True, fuzzy=True)
@@ -239,23 +241,34 @@ def find_dates(text):
                 continue
             if not dt:
                 continue
-            dt_date = dt.date().isoformat()
-            if dt_date in seen:
+            # normalize to date object
+            dt_date = dt.date()
+            iso = dt_date.isoformat()
+            if iso in seen:
                 continue
-            seen.add(dt_date)
+            seen.add(iso)
             pos = match.start()
             window_start = max(0, pos - 180)
             window_end = min(len(cleaned), pos + len(match.group(0)) + 220)
             window = lowered[window_start:window_end]
-            all_matches.append((dt_date, bool(any(k in window for k in deadline_keywords)), bool(any(k in window for k in issue_keywords))))
+            is_deadline = any(k in window for k in deadline_keywords)
+            is_issue = any(k in window for k in issue_keywords)
+            all_matches.append((dt_date, is_deadline, is_issue))
 
-    deadline_dates = sorted({d for d, is_deadline, _ in all_matches if is_deadline})
+    # Prefer explicit deadline mentions and exclude obvious issue/publication dates.
+    deadline_dates = sorted({d for d, is_deadline, is_issue in all_matches if is_deadline and not is_issue})
     if deadline_dates:
-        return [deadline_dates[-1]]
+        # return ISO strings sorted ascending (soonest first)
+        return [d.isoformat() for d in deadline_dates]
 
-    # fallback: accept only dates not obviously tied to issue metadata
-    remaining = sorted({d for d, _, is_issue in all_matches if not is_issue})
-    return remaining
+    # fallback: accept dates that are not marked as issue/publication and return sorted ascending
+    fallback = sorted({d for d, is_deadline, is_issue in all_matches if not is_issue})
+    if fallback:
+        return [d.isoformat() for d in fallback]
+
+    # as last resort return all discovered dates (ascending)
+    all_dates = sorted({d for d, _, _ in all_matches})
+    return [d.isoformat() for d in all_dates]
 
 
 def guess_sender(text):

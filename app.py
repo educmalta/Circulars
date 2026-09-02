@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from flask import Flask, render_template, redirect, url_for, jsonify, request, send_file, abort
 from dateutil import parser as dateparser
-from processor import scan_folder, DB_PATH, RAW_FOLDER, RAW_FOLDERS, init_db, is_maltese_filename
+from processor import scan_folder, DB_PATH, RAW_FOLDER, RAW_FOLDERS, init_db, is_maltese_filename, get_raw_folders
 
 
 def file_url_for(local_path):
@@ -27,7 +27,7 @@ def scan_with_retry():
     last_error = None
     for attempt in range(3):
         try:
-            scan_folder(RAW_FOLDERS, DB_PATH)
+            scan_folder(get_raw_folders(), DB_PATH)
             return
         except sqlite3.OperationalError as exc:
             last_error = exc
@@ -59,7 +59,8 @@ def open_file():
         abort(400)
 
     abs_path = os.path.abspath(os.path.expanduser(local_path))
-    allowed_roots = [os.path.abspath(root) for root in RAW_FOLDERS]
+    # Recompute approved roots at request time to avoid stale/import-time values
+    allowed_roots = [os.path.abspath(root) for root in get_raw_folders()]
     if not any(abs_path == root or abs_path.startswith(root + os.sep) for root in allowed_roots):
         abort(403)
     if not os.path.isfile(abs_path):
