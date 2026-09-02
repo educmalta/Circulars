@@ -125,6 +125,9 @@ DATE_MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Jannar|F
 
 FORBIDDEN_DEPARTMENTS = {'MALTA', 'VET', 'ECEC', 'PRIMARY', 'SECONDARY', 'DATE'}
 
+# filename substrings to always exclude (case-insensitive)
+EXCLUDE_PATTERNS = ['extension solstice', 'counting staff', 'taxstatementprintout', 'invoice_', 'jessica']
+
 MONTH_LITERAL = "Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December"
 DATE_REGEXES = [
     # numeric dates like 25/09/2026 or 2026-09-25
@@ -391,6 +394,12 @@ def scan_folder(folder=None, db_path=DB_PATH):
             for root, _, files in os.walk(current_folder):
                 for fn in files:
                     lower = fn.lower()
+                    # skip excluded filename patterns (non-circular noise)
+                    try:
+                        if any(pat in lower for pat in EXCLUDE_PATTERNS):
+                            continue
+                    except Exception:
+                        pass
                     # only accept PDF/DOCX
                     if not (lower.endswith('.docx') or lower.endswith('.pdf')):
                         continue
