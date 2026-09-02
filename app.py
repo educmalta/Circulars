@@ -11,9 +11,11 @@ from processor import scan_folder, DB_PATH, RAW_FOLDER, RAW_FOLDERS, init_db, is
 
 def file_url_for(local_path):
     try:
-        return url_for('open_file', path=local_path, _external=False)
+        from urllib.parse import quote_plus
+        return url_for('open_file', path=quote_plus(local_path), _external=False)
     except Exception:
-        return '/open-file?path=' + local_path.replace('\\', '/')
+        from urllib.parse import quote_plus
+        return '/open-file?path=' + quote_plus(local_path)
 
 app = Flask(__name__)
 
@@ -58,10 +60,16 @@ def open_file():
     if not local_path:
         abort(400)
 
+    # decode path if it was quoted by file_url_for
+    try:
+        from urllib.parse import unquote_plus
+        local_path = unquote_plus(local_path)
+    except Exception:
+        pass
     abs_path = os.path.abspath(os.path.expanduser(local_path))
     # Recompute approved roots at request time to avoid stale/import-time values
     allowed_roots = [os.path.abspath(root) for root in get_raw_folders()]
-    if not any(abs_path == root or abs_path.startswith(root + os.sep) for root in allowed_roots):
+    if not any(abs_path == root or abs_path.startswith(root + os.sep) or abs_path.startswith(root) for root in allowed_roots):
         abort(403)
     if not os.path.isfile(abs_path):
         abort(404)

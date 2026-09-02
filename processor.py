@@ -83,7 +83,7 @@ def get_raw_folders():
 
 
 # helper to validate filenames: must start with DEPT NUM[._/- or space]YEAR e.g. DSVP 01/2026 or RSIRD 04_2026_EN
-FILENAME_PATTERN = re.compile(r"^\s*(?:[A-Z]{2,8}(?:\s+[A-Z]{2,8})*)[._/\-\s]*\d{1,4}[._/\-\s]*\d{4}", re.IGNORECASE)
+FILENAME_PATTERN = re.compile(r"^\s*(?:[A-Z]{2,10}(?:\s+[A-Z]{2,10})*)[._/\-\s]*\d{1,4}[._/\-\s]*\d{4}", re.IGNORECASE)
 
 
 def parse_filename_reference(filename):
@@ -312,19 +312,18 @@ def deep_extract_reference(text):
         s = text
     # Look for patterns like 'DG DES 24/2026' or 'NLA 43 June 2026'
     # First try strict numeric year
-    patt = re.compile(r"([A-Z]{2,8}(?:\s+[A-Z]{2,8})*)[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})")
+    patt = re.compile(r'([A-Za-z]{2,10}(?:\s+[A-Za-z]{2,10})*)[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{4})')
     m = patt.search(s)
     if m:
         dept_raw = m.group(1)
-        # ensure matched tokens are uppercase in original
-        if any(c.islower() for c in dept_raw):
-            pass
-        else:
-            dept = dept_raw.upper().strip()
+        dept = dept_raw.upper().strip()
+        try:
             num = int(m.group(2))
             yr = int(m.group(3))
-            if num <= 9999 and yr >= 2000:
-                return dept, num, yr
+        except Exception:
+            return None
+        if num <= 9999 and yr >= 2000:
+            return dept, num, yr
     # Fallback: department + number + month/year (e.g., 'NLA 43 June 2026')
     patt2 = re.compile(r"([A-Z]{2,8}(?:\s+[A-Z]{2,8})*)[._/\-\s]+(\d{1,4})\s+([A-Za-z]{3,}\s+\d{4})")
     m2 = patt2.search(s)
@@ -354,10 +353,7 @@ def extract_reference_from_text(text):
     for pattern in patterns:
         match = re.search(pattern, text)
         if match:
-            # Ensure the matched department tokens are all uppercase in the original text
             dept_text = match.group(1)
-            if any(c.islower() for c in dept_text):
-                continue
             department = dept_text.upper().strip()
             number = int(match.group(3))
             year = int(match.group(4))
@@ -415,7 +411,8 @@ def scan_folder(folder=None, db_path=DB_PATH):
                     if not is_allowed_filename(fn) and not ref_from_content:
                         # skip unrelated attachments or exports
                         continue
-                    if is_maltese_filename(fn):
+                    # If filename looks Maltese, keep only if content contains a valid reference
+                    if is_maltese_filename(fn) and not ref_from_content:
                         continue
 
                     cur.execute('SELECT last_modified, deadlines FROM circulars WHERE filepath=?', (path,))
@@ -425,20 +422,12 @@ def scan_folder(folder=None, db_path=DB_PATH):
                     dates = find_dates(text)
 
                     # Try to parse filename patterns like 'DGPM 14/2026' or 'DES 23.2025'
-                    department = None
-                    circular_num = None
-                    year = None
                     ref = ref_from_content
                     if not ref:
                         ref = extract_reference_from_text(fn + ' ' + text)
-                    if ref:
-                        department, circular_num, year = ref
-
-                    # Try to parse filename patterns like 'DGPM 14/2026' or 'DES 23.2025'
                     department = None
                     circular_num = None
                     year = None
-                    ref = extract_reference_from_text(fn + ' ' + text)
                     if ref:
                         department, circular_num, year = ref
                     # explicit guard: do not accept standalone 4000 values without a department code
