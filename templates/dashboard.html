@@ -13,7 +13,10 @@
   </head>
   <body>
     <h1 style="color:#0b5cff;">Circulars Dashboard</h1>
-    <p><a href="/deadlines">View Deadlines</a> | <a href="/rescan">Rescan Now</a></p>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0">
+      <a href="/deadlines">View Deadlines</a>
+      <form method="post" action="/rescan" style="margin:0;display:inline"><button type="submit">Rescan Now</button></form>
+    </div>
 
     <div style="display:flex;align-items:center;gap:12px;margin:18px 0">
       <form id="filterForm" method="get" action="/dashboard" style="display:flex;align-items:center;gap:8px">
@@ -49,7 +52,7 @@
         <div style="width:160px">{{ it.sender }}</div>
         <div style="width:120px;text-align:center">{{ it.department or '-' }}</div>
         <div style="width:60px;text-align:center">{% if it.circular_number %}{{ '%02d'|format(it.circular_number) }}{% else %}-{% endif %}</div>
-        <div style="flex:1;min-width:220px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><code title="{{ it.filepath }}">{{ it.filepath }}</code></div>
+        <div style="flex:1;min-width:220px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><a href="{{ it.filepath_url }}" target="_blank" rel="noopener noreferrer"><code title="{{ it.filepath }}">{{ it.filepath }}</code></a></div>
       </div>
       {% endfor %}
     </div>

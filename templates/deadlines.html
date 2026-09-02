@@ -40,7 +40,7 @@
           <td style="font-weight:600">{{ it.filename }}</td>
           <td style="color:#b71c1c;font-weight:700">{{ it.best_deadline_display }}</td>
           <td>{{ it.days_distance }}</td>
-          <td><code>{{ it.filepath }}</code></td>
+          <td><a href="{{ it.filepath_url }}" target="_blank" rel="noopener noreferrer"><code>{{ it.filepath }}</code></a></td>
         </tr>
         {% endfor %}
       </tbody>

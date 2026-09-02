@@ -12,7 +12,7 @@ import time
 import requests
 from msal import PublicClientApplication
 
-GRAPH_SCOPES = ["Files.Read.All", "offline_access"]
+GRAPH_SCOPES = ["Files.Read.All"]  # offline_access is reserved and not accepted by MSAL initiate_device_flow in some tenants
 
 CLIENT_ID = os.environ.get('GRAPH_CLIENT_ID')
 TENANT = os.environ.get('GRAPH_TENANT', 'common')
@@ -105,12 +105,85 @@ def sync_sharepoint_folder(remote_path, local_target_folder):
     return downloaded
 
 
+def _encode_share_url(url):
+    import base64, urllib.parse
+    b = base64.urlsafe_b64encode(url.encode()).decode().rstrip('=')
+    return 'u!' + b
+
+
+def sync_sharepoint_from_share_link(share_url, local_target_folder):
+    """Download files from a SharePoint sharing link (recursive) into local_target_folder.
+    share_url: the full sharing URL (as provided by SharePoint)
+    """
+    os.makedirs(local_target_folder, exist_ok=True)
+    token = acquire_token_device()
+    share_id = _encode_share_url(share_url)
+    import urllib.parse
+    quoted = urllib.parse.quote(share_id, safe='')
+    # get the driveItem for the share
+    url = f"{GRAPH_API}/shares/{quoted}/driveItem"
+    resp = requests.get(url, headers={'Authorization': f'Bearer {token}'})
+    resp.raise_for_status()
+    item = resp.json()
+    # item has id and parentReference.driveId
+    drive_id = item.get('parentReference', {}).get('driveId')
+    item_id = item.get('id')
+    downloaded = []
+    # recursive walker using drive children
+    def walk_drive(drive_id, item_id, rel_prefix=''):
+        children_url = f"{GRAPH_API}/drives/{drive_id}/items/{item_id}/children"
+        url = children_url
+        while url:
+            r = requests.get(url, headers={'Authorization': f'Bearer {token}'})
+            r.raise_for_status()
+            data = r.json()
+            for child in data.get('value', []):
+                name = child.get('name')
+                rel = os.path.join(rel_prefix, name) if rel_prefix else name
+                if child.get('folder'):
+                    # recurse
+                    yield from walk_drive(drive_id, child.get('id'), rel)
+                else:
+                    if not name.lower().endswith(('.pdf', '.docx', '.doc')):
+                        continue
+                    dl = child.get('@microsoft.graph.downloadUrl')
+                    local_path = os.path.join(local_target_folder, rel)
+                    try:
+                        if dl:
+                            download_item(token, dl, local_path)
+                        else:
+                            url2 = f"{GRAPH_API}/drives/{drive_id}/items/{child.get('id')}/content"
+                            download_item(token, url2, local_path)
+                        downloaded.append(local_path)
+                    except Exception as e:
+                        print('Failed to download', name, e)
+            url = data.get('@odata.nextLink')
+        return
+
+    # if the shared item is a folder, walk it; if file, download it
+    if item.get('folder'):
+        for p in walk_drive(drive_id, item_id, ''):
+            pass
+    else:
+        # single file
+        name = item.get('name')
+        if name.lower().endswith(('.pdf', '.docx', '.doc')):
+            dl = item.get('@microsoft.graph.downloadUrl')
+            local_path = os.path.join(local_target_folder, name)
+            if dl:
+                download_item(token, dl, local_path)
+                downloaded.append(local_path)
+    return downloaded
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print('Usage: python sharepoint_client.py <remote_path> <local_target_folder>')
+        print('Usage: python sharepoint_client.py <remote_path_or_share_link> <local_target_folder>')
         sys.exit(1)
     remote = sys.argv[1]
     local = sys.argv[2]
-    print('Syncing', remote, '->', local)
-    files = sync_sharepoint_folder(remote, local)
+    if remote.startswith('http'):
+        files = sync_sharepoint_from_share_link(remote, local)
+    else:
+        files = sync_sharepoint_folder(remote, local)
     print('Downloaded', len(files), 'files')
