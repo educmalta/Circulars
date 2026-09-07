@@ -1,0 +1,20 @@
+# Local/private circular data
+data/*.db
+data/*.db-*
+data/*.bak*
+data/*.json
+data/*.txt
+sharepoint_downloads/
+tmp_attachments/
+
+# Python and local tooling artifacts
+__pycache__/
+scripts/__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
