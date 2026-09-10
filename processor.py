@@ -486,6 +486,11 @@ def deep_extract_reference(text):
 
 def extract_reference_from_text(text):
     # Accept variations like 'IPS No. 02/2026', 'IPS No . 02/2026', 'DGPM 14 2026', 'Ref: DGPM 14/2026' and multi-token departments
+    # Repeated-code letter circulars (for example "DSVP DSVP 060") need the
+    # scanner's filename/body-year handling; do not turn the repeated code
+    # into a fabricated 2060 reference here.
+    if re.match(r"^\s*([A-Z]{2,10})\s+\1\s+0*\d{1,4}\b", text or '', flags=re.IGNORECASE):
+        return None
     patterns = [
         r"\b(?:ref(?:er(?:en[cz]a|ence))?)\s*[:\-]?\s*"
         r"([A-Za-z]{2,10}(?:\s+[A-Za-z]{2,10})*)[._/\-\s]*?"
