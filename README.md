@@ -19,6 +19,9 @@ database backups, credentials, or `.env` files to the repository.
 2. References such as `DFIN 8/2025`, `IPS 10/23`, `DGPM/07 /2026`, `DG DES
    24/2026`, and similar department-number-year forms are normalised into
    department, circular number, and four-digit year fields.
+   Case differences are normalised (`IfE 68/2026` is stored as `IFE`), and
+   Maltese titles such as `Ċirkolari NLA 43 Ġunju 2026` retain `NLA` as the
+   department rather than interpreting the month as a department.
 3. PDF text is extracted with PyPDF2. An optional OCR fallback is attempted for
    image-only PDFs when `pdf2image`, Pillow, Tesseract, and `pytesseract` are
    available.
@@ -31,6 +34,12 @@ database backups, credentials, or `.env` files to the repository.
    open in a new browser tab.
 6. A background scan runs every 30 seconds, and **Rescan Now** invokes the same
    scan immediately.
+
+General-purpose Downloads files are accepted only when their filename contains
+an explicit circular reference. Known non-circular classes (invoices, bills,
+cluster rankings, payment-process documents, contracts, and similar forms)
+are excluded. This prevents arbitrary dates or uppercase words in a document
+body from inventing departments such as `INVOICE`, `ANED`, or `REGULATIONS`.
 
 ## Quick start
 

@@ -82,20 +82,57 @@ def get_raw_folders():
     return allowed if allowed else final
 
 
-# helper to validate filenames: must start with DEPT NUM[._/- or space]YEAR e.g. DSVP 01/2026 or RSIRD 04_2026_EN
-FILENAME_PATTERN = re.compile(r"^\s*(?:[A-Z]{2,10}(?:\s+[A-Z]{2,10})*)[._/\-\s]*\d{1,4}[._/\-\s]*\d{2,4}", re.IGNORECASE)
+# helper to validate filenames: official references must be at the beginning,
+# or follow an explicit Circular/Ref label. This avoids interpreting arbitrary
+# invoice, form, date, and application text as a department reference.
+FILENAME_PATTERN = re.compile(
+    r"^\s*(?:"
+    r"(?:circular|cir\.)\s+"
+    r"|(?:Ċirkolari)\s+"
+    r"|(?:ref(?:erence)?)\s*[:\-]?\s*"
+    r")?"
+    r"([A-Z]{2,10}(?:\s+[A-Z]{2,10})*)"
+    r"[._/\-\s]*(?:No\s*\.?\s*)?\d{1,4}[._/\-\s]*(?:\d{2,4}|"
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|"
+    r"Jannar|Frar|Marzu|April|Mejju|Ġunju|Lulju|Awwissu|"
+    r"Settembru|Ottubru|Novembru|Diċembru)\s+\d{2,4})",
+    re.IGNORECASE,
+)
 
 
 def parse_filename_reference(filename):
     name = os.path.splitext(filename)[0]
-    # Accept multi-token uppercase departments like 'DG DES' or 'NLA' but require uppercase tokens
-    match = re.search(r"\b((?:[A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{2,4})\b", name)
+    # Repeated-code letter circulars may omit the year from the filename; let
+    # the scanner combine their number with the year found in the document.
+    if re.match(r"^\s*([A-Z]{2,10})\s+\1\s+0*\d{1,4}\b", name, flags=re.IGNORECASE):
+        return None
+    # Only parse an explicit reference in the filename; never scan arbitrary
+    # words such as "Invoice" or "Cluster" as department names.
+    match = re.search(
+        r"^\s*(?:(?:circular|cir\.)\s+|(?:Ċirkolari)\s+|"
+        r"(?:ref(?:erence)?)\s*[:\-]?\s*)?"
+        r"((?:[A-Z]{2,10}(?:\s+[A-Z]{2,10})*))"
+        r"[._/\-\s]*(?:No\s*\.?\s*)?(\d{1,4})"
+        r"(?:[._/\-\s]*(\d{2,4})|"
+        r"\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|"
+        r"Jannar|Frar|Marzu|April|Mejju|Ġunju|Lulju|Awwissu|"
+        r"Settembru|Ottubru|Novembru|Diċembru)[a-zċġħż]*\s+(\d{2,4}))",
+        name,
+        flags=re.IGNORECASE,
+    )
     if not match:
         return None
     dept_raw = match.group(1)
     department = dept_raw.upper().strip()
+    tokens = department.split()
+    if any(token in FORBIDDEN_DEPARTMENTS or token in NON_DEPARTMENT_TOKENS or len(token) > 6 for token in tokens):
+        return None
+    if len(tokens) > 1 and tokens[0] == tokens[1]:
+        department = tokens[0]
     number = int(match.group(2))
-    year = int(match.group(3))
+    year = int(match.group(3) or match.group(4))
+    if department in FORBIDDEN_DEPARTMENTS:
+        return None
     # accept two-digit years like '23' -> 2023
     if year < 100:
         year = 2000 + year
@@ -121,13 +158,28 @@ MALTESE_MONTHS = {
     'Awwissu':'August','Settembru':'September','Ottubru':'October','Novembru':'November','Diċembru':'December',
     # lowercase variants will be replaced case-insensitively
 }
+NON_DEPARTMENT_TOKENS = {
+    'INVOICE', 'BILL', 'FORM', 'CLUSTER', 'CAMSCANNER', 'EMAIL',
+    'REGULATIONS', 'ANED', 'APPLICATION', 'COUNTING', 'STAFF',
+    'PAYMENT', 'PROCESS', 'CONTRACT', 'ORDER', 'SALES', 'MAY',
+    'FE', 'OF', 'MID', 'TERM', 'BDL',
+}
 
 DATE_MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Jannar|Frar|Marzu|April|Mejju|Ġunju|Lulju|Awwissu|Settembru|Ottubru|Novembru|Diċembru)"
 
-FORBIDDEN_DEPARTMENTS = {'MALTA', 'VET', 'ECEC', 'PRIMARY', 'SECONDARY', 'DATE'}
+FORBIDDEN_DEPARTMENTS = {
+    'MALTA', 'VET', 'ECEC', 'PRIMARY', 'SECONDARY', 'DATE',
+    'JAN', 'JUN', 'JUL', 'AUG', 'SEP', 'SEPT', 'OCT', 'NOV', 'DEC',
+    'JANNAR', 'FRAR', 'MARZU', 'APRIL', 'MEJJU', 'ĠUNJU', 'LULJU',
+    'AWWISSU', 'SETTEMBRU', 'OTTUBRU', 'NOVEMBRU', 'DIĊEMBRU',
+}
 
 # filename substrings to always exclude (case-insensitive)
-EXCLUDE_PATTERNS = ['extension solstice', 'counting staff', 'taxstatementprintout', 'invoice_', 'jessica']
+EXCLUDE_PATTERNS = [
+    'extension solstice', 'counting staff', 'taxstatementprintout',
+    'invoice', 'bill calculator', 'cluster', 'cluster vet',
+    'eupu payment', 'payment process', 'sales order', 'contract',
+]
 
 MONTH_LITERAL = "Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December"
 DATE_REGEXES = [
@@ -393,58 +445,66 @@ def deep_extract_reference(text):
         s = ' '.join(text.split())
     except Exception:
         s = text
-    # Look for patterns like 'DG DES 24/2026' or 'NLA 43 June 2026'
-    # First try strict numeric year
-    patt = re.compile(r'([A-Za-z]{2,10}(?:\s+[A-Za-z]{2,10})*)[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{2,4})')
-    m = patt.search(s)
-    if m:
-        dept_raw = m.group(1)
-        dept = dept_raw.upper().strip()
-        try:
-            num = int(m.group(2))
-            yr = int(m.group(3))
-        except Exception:
-            return None
-        if yr < 100:
-            yr = 2000 + yr
-        if num <= 9999 and yr >= 2000:
-            return dept, num, yr
-    # Fallback: department + number + month/year (e.g., 'NLA 43 June 2026')
-    patt2 = re.compile(r"([A-Z]{2,8}(?:\s+[A-Z]{2,8})*)[._/\-\s]+(\d{1,4})\s+([A-Za-z]{3,}\s+\d{4})")
-    m2 = patt2.search(s)
-    if m2:
-        dept_raw = m2.group(1)
-        if any(c.islower() for c in dept_raw):
-            pass
-        else:
-            dept = dept_raw.upper().strip()
-            num = int(m2.group(2))
-            # try to extract year from group3
-            yr_match = re.search(r"(19|20)\d{2}", m2.group(3))
-            if yr_match:
-                yr = int(yr_match.group(0))
-                if num <= 9999 and yr >= 2000:
-                    return dept, num, yr
+    month = (
+        r"(?:Jan|January|Feb|February|Mar|March|Apr|April|May|"
+        r"Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|"
+        r"October|Nov|November|Dec|December|Jannar|Frar|Marzu|"
+        r"April|Mejju|Ġunju|Lulju|Awwissu|Settembru|Ottubru|"
+        r"Novembru|Diċembru)"
+    )
+    # Prefer the department immediately before its number. This prevents a
+    # month in a title (for example "Ġunju 2026") becoming "UNJU".
+    patterns = [
+        re.compile(
+            r"\b([A-Za-z]{2,10}(?:\s+[A-Za-z]{2,10})*)"
+            r"[._/\-\s]+(?:No\s*\.?\s*)?(\d{1,4})"
+            r"[._/\-\s]+(\d{2,4})\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b([A-Za-z]{2,10}(?:\s+[A-Za-z]{2,10})*)"
+            r"[._/\-\s]+(\d{1,4})\s+" + month + r"[a-zċġħż]*\s+(\d{2,4})\b",
+            re.IGNORECASE,
+        ),
+    ]
+    for patt in patterns:
+        for m in patt.finditer(s):
+            dept = m.group(1).upper().strip()
+            if dept in FORBIDDEN_DEPARTMENTS:
+                continue
+            try:
+                num = int(m.group(2))
+                yr = int(m.group(3))
+            except Exception:
+                continue
+            if yr < 100:
+                yr = 2000 + yr
+            if num <= 999 and yr >= 2000:
+                return dept, num, yr
     return None
 
 
 def extract_reference_from_text(text):
     # Accept variations like 'IPS No. 02/2026', 'IPS No . 02/2026', 'DGPM 14 2026', 'Ref: DGPM 14/2026' and multi-token departments
     patterns = [
-        r"\b(?:ref(?:er(?:en[cz]a|ence))?)\s*[:\-]?\s*(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{2,4})",
-        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]*?(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*?(\d{2,4})",
-        r"\b(([A-Z]{2,8}(?:\s+[A-Z]{2,8})*))[._/\-\s]+No\s*\.?\s*(\d{1,4})[._/\-\s]*?(\d{2,4})",
+        r"\b(?:ref(?:er(?:en[cz]a|ence))?)\s*[:\-]?\s*"
+        r"([A-Za-z]{2,10}(?:\s+[A-Za-z]{2,10})*)[._/\-\s]*?"
+        r"(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*(\d{2,4})\b",
+        r"\b([A-Z]{2,10}(?:\s+[A-Z]{2,10})*)[._/\-\s]+"
+        r"(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*(\d{2,4})\b",
     ]
     for pattern in patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, text, flags=re.IGNORECASE if pattern.startswith(r"\b(?:ref") else 0)
         if match:
             dept_text = match.group(1)
             department = dept_text.upper().strip()
-            number = int(match.group(3))
-            year = int(match.group(4))
+            if department in FORBIDDEN_DEPARTMENTS:
+                continue
+            number = int(match.group(2))
+            year = int(match.group(3))
             if year < 100:
                 year = 2000 + year
-            if number <= 9999 and year >= 2000:
+            if number <= 999 and year >= 2000:
                 return department, number, year
     # fallback for file stems such as 'RSIRD 04_2026_EN'
     if isinstance(text, str):
@@ -504,10 +564,42 @@ def scan_folder(folder=None, db_path=DB_PATH):
                         else:
                             file_text = text
 
-                        # If filename doesn't match, allow the file only if content contains a valid reference like 'IPS 02/2026'
-                        ref_from_content = extract_reference_from_text(fn + ' ' + (file_text or ''))
+                        # Prefer an explicit filename reference. Body text can
+                        # contain dates and unrelated codes from attachments.
+                        ref_from_filename = parse_filename_reference(fn)
+                        # Some official letter circulars repeat the code and
+                        # only put the year in the document body, e.g.
+                        # "DSVP DSVP 060 - Letter Circular".
+                        if not ref_from_filename:
+                            duplicate = re.match(
+                                r"^\s*([A-Z]{2,10})\s+\1\s+0*(\d{1,4})\b",
+                                fn,
+                                flags=re.IGNORECASE,
+                            )
+                            body_year = re.search(r"\b(?:19|20)\d{2}\b", file_text or '')
+                            if duplicate and body_year:
+                                ref_from_filename = (
+                                    duplicate.group(1).upper(),
+                                    int(duplicate.group(2)),
+                                    int(body_year.group(0)),
+                                )
+                            elif duplicate:
+                                ref_from_filename = (
+                                    duplicate.group(1).upper(),
+                                    int(duplicate.group(2)),
+                                    datetime.fromtimestamp(mtime).year,
+                                )
+                        ref_from_content = ref_from_filename or extract_reference_from_text(file_text or '')
+                        downloads_root = os.path.abspath(os.path.join(os.path.expanduser('~'), 'Downloads'))
+                        path_is_download = os.path.abspath(path).startswith(downloads_root + os.sep)
                         if not is_allowed_filename(fn) and not ref_from_content:
                             # skip unrelated attachments or exports
+                            return
+                        # Downloads is a general-purpose folder. Do not let
+                        # arbitrary body text turn forms, invoices, or reports
+                        # into circulars; explicit filename references remain
+                        # accepted.
+                        if path_is_download and not ref_from_filename:
                             return
                         # If filename looks Maltese, keep only if content contains a valid reference
                         if is_maltese_filename(fn) and not ref_from_content:
@@ -522,7 +614,7 @@ def scan_folder(folder=None, db_path=DB_PATH):
                         # parse reference
                         ref = ref_from_content
                         if not ref:
-                            ref = extract_reference_from_text(fn + ' ' + (file_text or ''))
+                            ref = extract_reference_from_text(file_text or '')
                         department = None
                         circular_num = None
                         year = None
@@ -669,7 +761,31 @@ def _cleanup_db(cur, folder_list):
             if not fn or os.path.splitext(fn)[1].lower() not in ('.pdf', '.docx'):
                 cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
                 continue
+            lower_fn = (fn or '').lower()
+            if any(pattern in lower_fn for pattern in EXCLUDE_PATTERNS):
+                cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
+                continue
+            downloads_root = os.path.abspath(os.path.join(os.path.expanduser('~'), 'Downloads'))
+            duplicate_code = re.match(
+                r"^\s*([A-Z]{2,10})\s+\1\s+0*\d{1,4}\b",
+                fn or '',
+                flags=re.IGNORECASE,
+            )
+            if (
+                os.path.abspath(fp).startswith(downloads_root + os.sep)
+                and not parse_filename_reference(fn or '')
+                and not duplicate_code
+            ):
+                cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
+                continue
             if dept is None or num is None or year is None:
+                cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
+                continue
+            dept_tokens = str(dept).upper().split()
+            if (
+                any(token in FORBIDDEN_DEPARTMENTS or token in NON_DEPARTMENT_TOKENS or len(token) > 6 for token in dept_tokens)
+                or (len(dept_tokens) > 1 and dept_tokens[0] != dept_tokens[1] and len(dept_tokens[0]) > 6)
+            ):
                 cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
                 continue
             if not is_allowed_filename(fn) and not extract_reference_from_text((fn or '') + ' ' + (snippet or '')):
