@@ -68,7 +68,8 @@ def get_raw_folders():
             final.append(p)
             seen.add(p)
 
-    # Keep authoritative roots if they exist; order: desktop raw, OneDrive ministry, Downloads
+    # Keep authoritative roots if they exist; include Outlook's local
+    # attachment cache so forwarded email attachments are rescanned too.
     allowed = []
     desktop = os.path.abspath(os.path.expanduser(DEFAULT_RAW_FOLDER)) if DEFAULT_RAW_FOLDER else None
     if desktop and desktop in final:
@@ -78,6 +79,8 @@ def get_raw_folders():
         allowed.append(onedrive_min)
     if downloads and downloads in final and downloads not in allowed:
         allowed.append(downloads)
+    if outlook_cache and outlook_cache in final and outlook_cache not in allowed:
+        allowed.append(outlook_cache)
     # fallback: if none exist, return whatever final resolved
     return allowed if allowed else final
 
@@ -170,6 +173,8 @@ DATE_MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Jannar|F
 FORBIDDEN_DEPARTMENTS = {
     'MALTA', 'VET', 'ECEC', 'PRIMARY', 'SECONDARY', 'DATE',
     'JAN', 'JUN', 'JUL', 'AUG', 'SEP', 'SEPT', 'OCT', 'NOV', 'DEC',
+    'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER',
+    'DECEMBER',
     'JANNAR', 'FRAR', 'MARZU', 'APRIL', 'MEJJU', 'ĠUNJU', 'LULJU',
     'AWWISSU', 'SETTEMBRU', 'OTTUBRU', 'NOVEMBRU', 'DIĊEMBRU',
 }
@@ -179,7 +184,10 @@ EXCLUDE_PATTERNS = [
     'extension solstice', 'counting staff', 'taxstatementprintout',
     'invoice', 'bill calculator', 'cluster', 'cluster vet',
     'eupu payment', 'payment process', 'sales order', 'contract',
+    'rabat middle school',
 ]
+MIN_CIRCULAR_YEAR = 2020
+MAX_CIRCULAR_YEAR = datetime.now().year + 1
 
 MONTH_LITERAL = "Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December"
 DATE_REGEXES = [
@@ -572,10 +580,13 @@ def scan_folder(folder=None, db_path=DB_PATH):
                         # Prefer an explicit filename reference. Body text can
                         # contain dates and unrelated codes from attachments.
                         ref_from_filename = parse_filename_reference(fn)
+                        filename_ref_has_zero = bool(
+                            ref_from_filename and ref_from_filename[1] == 0
+                        )
                         # Some official letter circulars repeat the code and
                         # only put the year in the document body, e.g.
                         # "DSVP DSVP 060 - Letter Circular".
-                        if not ref_from_filename:
+                        if not ref_from_filename or ref_from_filename[1] == 0:
                             duplicate = re.match(
                                 r"^\s*([A-Z]{2,10})\s+\1\s+0*(\d{1,4})\b",
                                 fn,
@@ -594,9 +605,69 @@ def scan_folder(folder=None, db_path=DB_PATH):
                                     int(duplicate.group(2)),
                                     datetime.fromtimestamp(mtime).year,
                                 )
-                        ref_from_content = ref_from_filename or extract_reference_from_text(file_text or '')
+                        if not ref_from_filename:
+                            no_year = re.match(
+                                r"^\s*([A-Z]{2,10})\s+0*(\d{1,3})\s*[-–]",
+                                fn,
+                                flags=re.IGNORECASE,
+                            )
+                            body_year = re.search(r"\b(?:19|20)\d{2}\b", file_text or '')
+                            if no_year and body_year and re.search(
+                                r"\b(?:letter\s+circular|ref(?:erence)?)\b",
+                                file_text or '',
+                                flags=re.IGNORECASE,
+                            ):
+                                ref_from_filename = (
+                                    no_year.group(1).upper(),
+                                    int(no_year.group(2)),
+                                    int(body_year.group(0)),
+                                )
+                        body_ref = extract_reference_from_text(file_text or '')
+                        # An explicit Ref: line in the document wins over a
+                        # title date. For example, DSVP 004 - Title.pdf
+                        # must use Ref: DSVP 004/2023 in its body.
+                        if body_ref and (
+                            not ref_from_filename
+                            or filename_ref_has_zero
+                        ):
+                            ref_from_filename = body_ref
+                        ref_from_content = ref_from_filename or body_ref
+                        no_year = re.match(
+                            r"^\s*([A-Z]{2,10})\s+0*(\d{1,3})\s*[-–]",
+                            fn,
+                            flags=re.IGNORECASE,
+                        )
+                        if no_year and (
+                            not ref_from_filename or filename_ref_has_zero
+                        ):
+                            body_year = re.search(
+                                r"\b(?:19|20)\d{2}\b", file_text or ''
+                            )
+                            if body_year and re.search(
+                                r"\b(?:letter\s+circular|ref(?:erence)?)\b",
+                                file_text or '',
+                                flags=re.IGNORECASE,
+                            ):
+                                ref_from_content = (
+                                    no_year.group(1).upper(),
+                                    int(no_year.group(2)),
+                                    int(body_year.group(0)),
+                                )
                         downloads_root = os.path.abspath(os.path.join(os.path.expanduser('~'), 'Downloads'))
                         path_is_download = os.path.abspath(path).startswith(downloads_root + os.sep)
+                        outlook_root = os.path.abspath(os.path.join(
+                            os.path.expanduser('~'), 'AppData', 'Local',
+                            'Microsoft', 'Windows', 'INetCache', 'Content.Outlook'
+                        ))
+                        path_is_outlook_cache = os.path.abspath(path).startswith(outlook_root + os.sep)
+                        cache_explicit_name = re.match(
+                            r"^\s*(?:"
+                            r"(?:circular|cir\.|letter\s+circular|Ċirkolari|ref(?:erence)?)\b"
+                            r"|[A-Za-z]{2,5}(?:\s+[A-Za-z]{2,5})?\s+0*\d{1,4}"
+                            r")",
+                            fn,
+                            flags=re.IGNORECASE,
+                        )
                         if not is_allowed_filename(fn) and not ref_from_content:
                             # skip unrelated attachments or exports
                             return
@@ -605,6 +676,8 @@ def scan_folder(folder=None, db_path=DB_PATH):
                         # into circulars; explicit filename references remain
                         # accepted.
                         if path_is_download and not ref_from_filename:
+                            return
+                        if path_is_outlook_cache and not cache_explicit_name:
                             return
                         # If filename looks Maltese, keep only if content contains a valid reference
                         if is_maltese_filename(fn) and not ref_from_content:
@@ -658,6 +731,13 @@ def scan_folder(folder=None, db_path=DB_PATH):
                                     year = datetime.fromtimestamp(mtime).year
                                 except Exception:
                                     year = None
+
+                        if (
+                            year is None
+                            or year < MIN_CIRCULAR_YEAR
+                            or year > MAX_CIRCULAR_YEAR
+                        ):
+                            return
 
                         # persist to DB (same logic as before)
                         if department and circular_num and year:
@@ -784,6 +864,9 @@ def _cleanup_db(cur, folder_list):
                 cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
                 continue
             if dept is None or num is None or year is None:
+                cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
+                continue
+            if int(year) < MIN_CIRCULAR_YEAR or int(year) > MAX_CIRCULAR_YEAR:
                 cur.execute('DELETE FROM circulars WHERE id=?', (rid,))
                 continue
             dept_tokens = str(dept).upper().split()

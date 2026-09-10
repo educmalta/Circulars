@@ -13,7 +13,9 @@ database backups, credentials, or `.env` files to the repository.
 
 ## How it works
 
-1. `processor.py` scans the configured local roots for PDF and DOCX circulars.
+1. `processor.py` scans the configured local roots for PDF and DOCX circulars,
+   including Outlook's local attachment cache so forwarded email attachments
+   are discovered after they are opened or saved by Outlook.
    Saved `.eml` files are supported through the standard-library email parser;
    saved `.msg` files are supported when `extract_msg` is installed.
 2. References such as `DFIN 8/2025`, `IPS 10/23`, `DGPM/07 /2026`, `DG DES
@@ -40,6 +42,10 @@ an explicit circular reference. Known non-circular classes (invoices, bills,
 cluster rankings, payment-process documents, contracts, and similar forms)
 are excluded. This prevents arbitrary dates or uppercase words in a document
 body from inventing departments such as `INVOICE`, `ANED`, or `REGULATIONS`.
+Only circular years from 2020 through the current year (with the next year
+allowed for advance notices) are retained. School-originated material such as
+Rabat Middle School documents is excluded because schools do not issue the
+official ministry circulars represented by this dashboard.
 
 ## Quick start
 
