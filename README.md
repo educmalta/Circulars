@@ -86,7 +86,7 @@ Security note: device-code sign-in requires interactive approval and is recommen
 Run the existing syntax and parser checks from the repository root:
 
     python -m py_compile processor.py app.py
-    python -c "from processor import parse_filename_reference; assert parse_filename_reference('DFIN 8/25.pdf') == ('DFIN', 8, 2025); assert parse_filename_reference('IPS 10/23.pdf') == ('IPS', 10, 2023)"
+    python -c "from processor import parse_filename_reference, extract_reference_from_text; assert parse_filename_reference('DFIN 8/25.pdf') == ('DFIN', 8, 2025); assert parse_filename_reference('IPS 10/23.pdf') == ('IPS', 10, 2023); assert extract_reference_from_text('DLE Circular No. 1/2026') == ('DLE', 1, 2026)"
 
 Do not run a full scan against private folders in CI. Local scans require access
 to the configured folders and write only to the ignored local database.

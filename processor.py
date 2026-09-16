@@ -105,6 +105,18 @@ FILENAME_PATTERN = re.compile(
 
 def parse_filename_reference(filename):
     name = os.path.splitext(filename)[0]
+    labelled = re.match(
+        r"^\s*(?:circular|cir\.|Ċirkolari)?\s*([A-Z]{2,10})\s+"
+        r"(?:Circular|Cirkolari)\s+(?:No\s*\.?\s*)?(\d{1,4})"
+        r"[._/\-\s]*(\d{2,4})",
+        name,
+        flags=re.IGNORECASE,
+    )
+    if labelled:
+        year = int(labelled.group(3))
+        if year < 100:
+            year += 2000
+        return labelled.group(1).upper(), int(labelled.group(2)), year
     # Repeated-code letter circulars may omit the year from the filename; let
     # the scanner combine their number with the year found in the document.
     if re.match(r"^\s*([A-Z]{2,10})\s+\1\s+0*\d{1,4}\b", name, flags=re.IGNORECASE):
@@ -115,7 +127,7 @@ def parse_filename_reference(filename):
         r"^\s*(?:(?:circular|cir\.)\s+|(?:Ċirkolari)\s+|"
         r"(?:ref(?:erence)?)\s*[:\-]?\s*)?"
         r"((?:[A-Z]{2,10}(?:\s+[A-Z]{2,10})*))"
-        r"[._/\-\s]*(?:No\s*\.?\s*)?(\d{1,4})"
+        r"[._/\-\s]*(?:(?:Circular|Cirkolari)\s+)?(?:No\s*\.?\s*)?(\d{1,4})"
         r"(?:[._/\-\s]*(\d{2,4})|"
         r"\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|"
         r"Jannar|Frar|Marzu|April|Mejju|Ġunju|Lulju|Awwissu|"
@@ -500,6 +512,8 @@ def extract_reference_from_text(text):
     if re.match(r"^\s*([A-Z]{2,10})\s+\1\s+0*\d{1,4}\b", text or '', flags=re.IGNORECASE):
         return None
     patterns = [
+        r"\b([A-Z]{2,10})\s+(?:Circular|Cirkolari)\s+"
+        r"(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*(\d{2,4})\b",
         r"\b(?:ref(?:er(?:en[cz]a|ence))?)\s*[:\-]?\s*"
         r"([A-Za-z]{2,10}(?:\s+[A-Za-z]{2,10})*)[._/\-\s]*?"
         r"(?:No\s*\.?\s*)?(\d{1,4})[._/\-\s]*(\d{2,4})\b",
