@@ -40,6 +40,10 @@ def get_raw_folders():
     onedrive_ministry = os.path.join(user_home, 'OneDrive - Ministry for Education and Sport', 'Circulars')
     if onedrive_ministry not in configured:
         configured.append(onedrive_ministry)
+    # Outlook/OneDrive may materialize received attachments outside Circulars.
+    onedrive_attachments = os.path.join(user_home, 'OneDrive - Ministry for Education and Sport', 'Attachments', 'pdf')
+    if onedrive_attachments not in configured:
+        configured.append(onedrive_attachments)
     # also include the user's Downloads folder to catch email attachments saved locally
     downloads = os.path.join(user_home, 'Downloads')
     if downloads not in configured:
@@ -77,6 +81,8 @@ def get_raw_folders():
     onedrive_min = os.path.abspath(os.path.expanduser(os.path.join(user_home, 'OneDrive - Ministry for Education and Sport', 'Circulars')))
     if onedrive_min and onedrive_min in final:
         allowed.append(onedrive_min)
+    if onedrive_attachments and onedrive_attachments in final:
+        allowed.append(onedrive_attachments)
     if downloads and downloads in final and downloads not in allowed:
         allowed.append(downloads)
     if outlook_cache and outlook_cache in final and outlook_cache not in allowed:
